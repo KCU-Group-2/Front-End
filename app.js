@@ -1,23 +1,18 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let user = null, courses = [], resources = [], points = 0, purchases = new Set(), pointsHistory = [];
-let currentFile = null, courseQuery = '', resourceQuery = '', typeFilter = 'All', busy = false;
+let user = null, courses = [], resources = [];
+let courseQuery = '', resourceQuery = '', busy = false;
 // Shared data helpers used by multiple pages.
 const courseBy = id => courses.find(c => String(c.id) === String(id));
 const resourceBy = id => resources.find(r => String(r.id) === String(id));
 const code = c => c ? (c.code || `${c.subject || ''} ${c.course_number ?? ''}`.trim()) : 'Unknown course';
 const route = id => encodeURIComponent(String(id));
-const purchased = r => purchases.has(String(r.id));
-const owned = r => r.owner_id === user?.id;
-const accessible = r => purchased(r) || owned(r);
-const pdf = '<span class="pdf" aria-hidden="true">PDF</span>';
 // Shared UI notification and navigation helpers.
 function toast(message) { $('#toast').textContent = message; $('#toast').style.display = 'block'; clearTimeout(window.toastTimer); window.toastTimer = setTimeout(() => $('#toast').style.display = 'none', 5000); }
 function go(path) { if (location.hash === '#' + path) render(); else location.hash = path; }
-// Shared API layer: uses the real backend or the browser-only demo backend.
+// Shared API layer: real FastAPI requests only.
 async function api(path, options = {}) {
-  if(CONFIG.mode==='demo') return demoAPI(path,options);
-  if (location.protocol === 'file:') throw new Error('Run the backend and open http://127.0.0.1:8000 to use StudySwap.');
+  if (location.protocol === 'file:') throw new Error('Open this frontend at http://localhost:3000/studyswap.html.');
   let response;
   const token = sessionStorage.getItem('studyswap-access-token');
   const headers = new Headers(options.headers || {});
@@ -28,6 +23,7 @@ async function api(path, options = {}) {
   if (!response.ok) {
     if (response.status === 401 && path !== '/login' && path !== '/signup') {
       sessionStorage.removeItem('studyswap-access-token');
+      sessionStorage.removeItem('studyswap-user');
       user = null;
       render();
     }
@@ -41,31 +37,28 @@ async function api(path, options = {}) {
  * Data Loading Section **From API
  * 
  */
-async function loadData() {
-  const [courseData, resourceData] = await Promise.all([
-    api('/courses'), // 수업 목록을 로딩할 예정
-    api('/resources') // 특정 Course의 등록된 자료를 API에서 가져옴
-  ]);
+// API origin is configured in the HTML file.
+const CONFIG = { apiBase: (window.STUDYSWAP_API_BASE || 'http://127.0.0.1:8000').replace(/\/$/, '') };
+const shortDescription = c => String(c?.title || '');
+function listData(data, key) {
+  const list = Array.isArray(data) ? data : data?.[key];
+  if (!Array.isArray(list)) throw new Error(`Invalid ${key} response from the server.`);
+  return list;
+}
+function setProfile(data) {
+  const profile = data.user || data;
+  if (profile.id == null) throw new Error('The server did not return a user ID.');
+  user = {...profile, name: profile.name || profile.user_metadata?.name || profile.email || 'Account'};
 
-  user = {
-    id: 'temporary-user',
-    name: 'Test User',
-    email: 'test123@wisc.edu',
-    role: 'student'
-  };
-
-  points = 120; // Starting Point
-  purchases = new Set();
-  pointsHistory = [];
-  courses = courseData;
-  resources = resourceData;
+}
+async function refreshResources(courseId) {
+  const rows = listData(await api('/courses/' + route(courseId) + '/resources'), 'resources');
+  resources = resources.filter(r => String(r.course_id) !== String(courseId)).concat(rows);
 }
 
 // Shared application header shown on authenticated pages.
 function header(page) {
-  const role = String(user.role || 'student').toLowerCase();
-  const roleLabel = role === 'admin' ? 'Admin' : 'Student';
-  return `<header class="header"><a class="brand" href="#home"><span class="mark">S</span>StudySwap</a><nav class="nav" aria-label="Main navigation">${[['home','Home'],['courses','Courses'],['upload','Upload'],['assistant','Assistant']].map(([id,label])=>`<a href="#${id}" class="${page===id || id==='courses' && ['course','resource'].includes(page) ? 'active':''}">${label}</a>`).join('')}</nav><div class="account"><button class="points points-button" id="points-button" aria-label="View points history">${points} pts</button><span class="role-badge" aria-label="Role: ${roleLabel}">${roleLabel}</span><button class="avatar" id="account-button" aria-label="Account menu">${esc(user.name.slice(0,2).toUpperCase())}</button></div></header>${CONFIG.mode==='demo'?'<div class="demo"><span>Frontend demo · Demo courses and points · PDFs saved in this browser</span></div>':''}`;
+  return `<header class="header"><a class="brand" href="#home">StudySwap</a><nav class="nav"><a href="#home">Home</a><a href="#courses">Courses</a><a href="#upload">Upload</a></nav><div class="account"><button class="btn" id="account-button">${esc(user.name)}</button></div></header>`;
 }
 
 // Login page renderer.
@@ -105,7 +98,7 @@ function login() {
     </main>
   `;
 }
-// Home page: displays courses containing purchased resources.
+// Reusable course card.
 function courseCard(c) {
   return `<a class="panel course-mini" href="#course/${route(c.id)}"><h3>${esc(code(c))}</h3><p class="course-summary">${esc(shortDescription(c))}</p></a>`;
 }
@@ -160,9 +153,7 @@ function signupPage(){
 
 // Reusable course card used on the Home page.
 function home() {
-  const boughtCourses = new Set(resources.filter(purchased).map(r => String(r.course_id)));
-  const list = courses.filter(c => boughtCourses.has(String(c.id)));
-  return `<main class="main narrow"><div class="page-heading"><h1>My courses</h1><p>Courses with resources you've purchased using points.</p></div><div class="courses-mini">${list.map(courseCard).join('') || '<div class="panel empty" style="grid-column:1/-1"><h2>No purchased courses yet</h2><p>Purchase a resource in Courses to add its course here.</p><a class="btn dark" href="#courses">Browse courses</a></div>'}</div></main>`;
+  return `<main class="main narrow"><h1>Welcome, ${esc(user.name)}</h1><div class="panel section"><h2>My courses</h2><p>Purchased courses will appear here when the purchase feature is available.</p><a class="btn dark" href="#courses">Find a course</a></div></main>`;
 }
 
 // Courses page: search form and results container.
@@ -171,548 +162,166 @@ function coursesPage() {
 }
 
 // Courses page: filters and renders matching courses.
-function showCourses() {
-  const words = courseQuery.toLowerCase().split(/\s+/).filter(Boolean);
-  const list = courses.filter(c => words.every(w => (code(c)+' '+c.title).toLowerCase().includes(w)));
-  $('#result-summary').textContent = `${list.length} courses`;
-  $('#course-results').innerHTML = list.map(c => `<a class="panel result course-result" href="#course/${route(c.id)}"><div><h3>${esc(code(c))}</h3><p class="course-summary">${esc(shortDescription(c))}</p></div></a>`).join('') || '<div class="panel empty">No matching courses.</div>';
+let searchVersion = 0;
+async function showCourses() {
+  const version = ++searchVersion;
+  const node = $('#course-results'), summary = $('#result-summary');
+  summary.textContent = 'Searching…';
+  try {
+    const list = listData(await api('/courses/search?q=' + encodeURIComponent(courseQuery)), 'courses');
+    if (version !== searchVersion || !node.isConnected) return;
+    for (const c of list) { const i = courses.findIndex(x => String(x.id) === String(c.id)); if (i < 0) courses.push(c); else courses[i] = c; }
+    summary.textContent = `${list.length} courses`;
+    node.innerHTML = list.map(c => `<a class="panel result course-result" href="#course/${route(c.id)}"><div><h3>${esc(code(c))}</h3><p>${esc(c.title)}</p></div></a>`).join('') || '<div class="panel empty">No matching courses.</div>';
+  } catch (error) { if (version === searchVersion && node.isConnected) { summary.textContent = error.message; node.innerHTML = ''; } }
 }
 
 // Reusable resource row used on a Course Detail page.
 function resourceRow(r) {
-  const label = accessible(r) ? (owned(r) ? 'Your upload' : 'Purchased') : r.has_file ? `${r.price} pts` : 'File unavailable';
-  return `<a class="resource" href="#resource/${route(r.id)}">${pdf}<div class="grow"><h3>${esc(r.title)}</h3><small>${esc(r.resource_type)}</small></div><span class="tag ${accessible(r)?'green':''}">${label}</span></a>`;
+  return `<a class="resource" href="#resource/${route(r.id)}"><div class="grow"><h3>${esc(r.title)}</h3><small>${esc(r.resource_type)}</small></div><span>View →</span></a>`;
 }
 // Course Detail page: resources, filters, and upload link.
 function coursePage(id) {
   const c = courseBy(id); if (!c) return notFound();
-  return `<main class="main narrow"><div class="breadcrumb"><a href="#courses">Courses</a> / ${esc(code(c))}</div><div class="row between page-heading"><div><h1>${esc(code(c))}</h1><p>${esc(shortDescription(c))}</p></div><a class="btn dark" href="#upload/${route(c.id)}">Upload for this course</a></div><div class="section-title"><h2>Resources</h2><select id="resource-filter" aria-label="Filter resources" style="width:auto"><option>All</option><option>Purchased</option><option>My uploads</option></select></div><div class="search"><input id="resource-search" aria-label="Search resources" placeholder="Search resources" value="${esc(resourceQuery)}"></div><div class="panel list" id="resource-results"></div></main>`;
+  return `<main class="main narrow"><div class="breadcrumb"><a href="#courses">Courses</a> / ${esc(code(c))}</div><div class="row between page-heading"><div><h1>${esc(code(c))}</h1><p>${esc(shortDescription(c))}</p></div><a class="btn dark" href="#upload/${route(c.id)}">Upload for this course</a></div><div class="section-title"><h2>Resources</h2><select id="resource-filter" aria-label="Filter resources" style="width:auto"><option>All</option></select></div><div class="search"><input id="resource-search" aria-label="Search resources" placeholder="Search resources" value="${esc(resourceQuery)}"></div><div class="panel list" id="resource-results"></div></main>`;
 }
 
-// Course Detail page: filters resources by text and ownership/purchase state.
+// Course Detail page: filters the fetched course resources by title.
 // 특정 수업에 등록된 자료들을 list 형식으로 저장한 뒤 인터페이스에 나열함
 function showResources(id) {
-  const list = resources.filter(r => String(r.course_id) === String(id) && r.title.toLowerCase().includes(resourceQuery.toLowerCase()) && (typeFilter==='All' || typeFilter==='Purchased' && purchased(r) || typeFilter==='My uploads' && owned(r)));
+  const list = resources.filter(r => String(r.course_id) === String(id) && String(r.title || '').toLowerCase().includes(resourceQuery.toLowerCase()));
   $('#resource-results').innerHTML = list.map(resourceRow).join('') || '<div class="empty">No resources to display.</div>';
 }
 
 // Resource Detail page: metadata, purchase button, or download link.
 function resourcePage(id) {
-  const r = resourceBy(id); if (!r) return notFound(); const c = courseBy(r.course_id);
-  const fileUrl = r.file_url || r.download_url || `${CONFIG.apiBase}/resources/${route(r.id)}/download`;
-  const previewClass = accessible(r) ? 'resource-preview' : 'resource-preview is-blurred';
-  const previewOverlay = accessible(r) ? '' : '<div class="resource-preview-overlay"><strong>Preview blurred</strong><span>Purchase this resource to read the document.</span></div>';
-  const accessibleActions = CONFIG.mode==='demo'
-    ? '<button class="btn dark" id="preview-button">Preview PDF</button><button class="btn" id="download-button">Download PDF</button>'
-    : `<a class="btn dark" href="${esc(fileUrl)}" target="_blank" rel="noopener">Preview PDF</a><a class="btn" href="${esc(fileUrl)}" download>Download PDF</a>`;
-  const preview = r.has_file ? `<div class="resource-preview-shell"><div id="resource-preview" class="${previewClass}" data-file-url="${esc(fileUrl)}"><iframe title="PDF preview" aria-label="PDF preview"></iframe></div>${previewOverlay}</div>` : '';
-  const editButton = owned(r)
-  ? `<a class="btn" href="#edit/${route(r.id)}">Edit resource</a>`
-  : '';
-  return `
-  <main class="main narrow">
-    <div class="breadcrumb">
-      <a href="#courses">Courses</a> /
-      <a href="#course/${route(r.course_id)}">${esc(code(c))}</a>
-    </div>
-
-    <section class="panel">
-      <span class="tag">${esc(r.resource_type)}</span>
-      <h1 style="margin-top:22px">${esc(r.title)}</h1>
-      <p>${esc(r.description || '')}</p>
-
-      <div class="meta">
-        <span>Course</span>
-        <strong>${esc(code(c))}</strong>
-      </div>
-
-      ${r.filename ? `
-        <div class="meta">
-          <span>File</span>
-          <strong style="overflow-wrap:anywhere">${esc(r.filename)}</strong>
-        </div>
-      ` : ''}
-
-      <div class="section">
-        ${preview}
-
-        ${!r.has_file ? `
-          <p>No PDF has been attached to this resource yet.</p>
-        ` : accessible(r) ? `
-          <span class="tag green">
-            ${owned(r) ? 'Your upload' : 'Purchased'}
-          </span>
-
-          <p style="margin-top:16px">
-            You can preview or download this PDF without spending more points.
-          </p>
-
-          <div class="row wrap">
-            ${accessibleActions}
-            ${editButton}
-          </div>
-        ` : `
-          <h2>${r.price} points</h2>
-          <p>Your balance: ${points} points</p>
-
-          <button
-            id="purchase-button"
-            class="btn dark"
-            ${points < r.price ? 'disabled' : ''}
-          >
-            Purchase for ${r.price} points
-          </button>
-
-          ${points < r.price ? '<p>Not enough points.</p>' : ''}
-        `}
-      </div>
-
-      <p id="resource-error" class="error" role="alert"></p>
-    </section>
-  </main>
-`;
+  const r = resourceBy(id); if (!r) return notFound();
+  return `<main class="main narrow"><div class="breadcrumb"><a href="#course/${route(r.course_id)}">${esc(code(courseBy(r.course_id)))}</a></div><section class="panel"><span class="tag">${esc(r.resource_type)}</span><h1 class="section">${esc(r.title)}</h1><p>${esc(r.description)}</p><p>PDF attachment is not available yet.</p><div class="row"><a class="btn" href="#edit/${route(r.id)}">Edit</a><button class="btn redtext" id="delete-button">Delete</button></div><p id="resource-error" class="error" role="alert"></p></section></main>`;
 }
-
-// Edit resource uploaded by user
-function editPage(id) {
-  const r = resourceBy(id);
-
-  if (!r || !owned(r)) {
-    return notFound();
-  }
-
-  const resourceTypes = [
-    'Notes',
-    'Study guide',
-    'Cheatsheet',
-    'Practice',
-    'Old exam'
-  ];
-
-  return `
-    <main class="main narrow">
-      <section class="panel">
-        <h1>Edit resource</h1>
-        <p>Update your resource details or replace the PDF.</p>
-
-        <form id="edit-form">
-          <div class="form-grid section">
-            <label>
-              Course
-              <select name="course_id" required>
-                ${courses.map(c => `
-                  <option
-                    value="${esc(c.id)}"
-                    ${String(c.id) === String(r.course_id) ? 'selected' : ''}
-                  >
-                    ${esc(code(c))}
-                  </option>
-                `).join('')}
-              </select>
-            </label>
-
-            <label>
-              Resource type
-              <select name="resource_type">
-                ${resourceTypes.map(t => `
-                  <option
-                    value="${esc(t)}"
-                    ${t === r.resource_type ? 'selected' : ''}
-                  >
-                    ${esc(t)}
-                  </option>
-                `).join('')}
-              </select>
-            </label>
-          </div>
-
-          <label class="field">
-            Title
-            <input
-              name="title"
-              required
-              maxlength="150"
-              value="${esc(r.title)}"
-              placeholder="Give your resource a clear title"
-            >
-          </label>
-
-          <label class="field">
-            Description (optional)
-            <textarea
-              name="description"
-              rows="3"
-              maxlength="3000"
-              placeholder="What does this resource cover?"
-            >${esc(r.description || '')}</textarea>
-          </label>
-
-          <div class="field">
-            <p>Current file: ${esc(r.filename || 'No PDF attached')}</p>
-
-            <label for="edit-file">Replace PDF (optional)</label>
-            <div class="dropzone">
-              <input
-                type="file"
-                id="edit-file"
-                name="file"
-                accept="application/pdf,.pdf"
-                aria-label="Choose replacement PDF"
-              >
-              <p class="field">
-                Choose a PDF up to 20 MB. Leave empty to keep the current file.
-              </p>
-            </div>
-          </div>
-
-          <label class="check">
-            <input type="checkbox" name="rights" required>
-            I created this material or have the right to share it.
-          </label>
-
-          <p id="edit-error" class="error" role="alert"></p>
-
-          <div class="row wrap">
-            <button class="btn dark" type="submit" disabled>
-              Save changes
-            </button>
-            <a class="btn" href="#resource/${route(r.id)}">Cancel</a>
-          </div>
-
-          <p class="field">
-            Saving is not connected yet.
-          </p>
-        </form>
-      </section>
-    </main>
-  `;
+function resourceForm(id, editing = false) {
+  const r = editing ? resourceBy(id) : null;
+  if (editing && !r) return notFound();
+  const selected = r?.course_id ?? id;
+  const types = [...new Set(['Notes','Study guide','Cheatsheet','Practice','Old exam', ...(r?.resource_type ? [r.resource_type] : [])])];
+  return `<main class="main narrow"><section class="panel"><h1>${editing ? 'Edit resource' : 'Upload a resource'}</h1><p>Register resource details. PDF attachments are not available yet.</p><form id="resource-form"><label class="field">Course<select name="course_id" required><option value="">Select a course</option>${courses.map(c => `<option value="${esc(c.id)}" ${String(c.id) === String(selected) ? 'selected' : ''}>${esc(code(c))} — ${esc(c.title)}</option>`).join('')}</select></label><label class="field">Type<select name="resource_type">${types.map(t => `<option ${t === r?.resource_type ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="field">Title<input name="title" required maxlength="150" value="${esc(r?.title || '')}"></label><label class="field">Description<textarea name="description" rows="4">${esc(r?.description || '')}</textarea></label><p id="form-error" class="error" role="alert"></p><button class="btn dark field" type="submit">${editing ? 'Save changes' : 'Create resource'}</button></form></section></main>`;
 }
-
-// Upload page: course selection, PDF form, and permissions confirmation.
-function uploadPage(id) {
-  return `<main class="main narrow"><section class="panel"><h1>Upload a resource</h1><p>Share a PDF you created or have permission to share.</p><form id="upload-form"><div class="form-grid section"><label>Course<select name="course_id" required><option value="">Select a course</option>${courses.map(c=>`<option value="${esc(c.id)}" ${String(c.id)===String(id)?'selected':''}>${esc(code(c))}</option>`).join('')}</select></label><label>Resource type<select name="resource_type">${['Notes','Study guide','Cheatsheet','Practice','Old exam'].map(t=>`<option>${t}</option>`).join('')}</select></label></div><label class="field">Title<input name="title" required maxlength="150" placeholder="Give your resource a clear title"></label><label class="field">Description (optional)<textarea name="description" rows="3" maxlength="3000" placeholder="What does this resource cover?"></textarea></label><label class="field">PDF file<div class="dropzone" id="dropzone"><input type="file" id="file" accept="application/pdf,.pdf" aria-label="Choose PDF"><p id="file-info" style="margin:14px 0 0">Choose or drop a PDF · Maximum 20 MB${CONFIG.mode==='demo'?' · Saved in this browser':''}</p></div></label><label class="check"><input type="checkbox" name="rights" required>I created this material or have the right to share it.</label><p id="upload-error" class="error" role="alert"></p><button class="btn dark" type="submit" ${courses.length?'':'disabled'}>Upload PDF</button></form></section></main>`;
-}
-// Upload page: validates and previews the selected PDF.
-function selectFile(file) {
-  currentFile = null;
-  if (!file) return;
-  if (!file.name.toLowerCase().endsWith('.pdf') || !file.size || file.size > 20*1024*1024) {
-    $('#file').value=''; $('#file-info').textContent='Choose or drop a PDF · Maximum 20 MB';
-    $('#upload-error').textContent='Choose a nonempty PDF no larger than 20 MB.'; return;
-  }
-  currentFile=file; $('#upload-error').textContent='';
-  $('#file-info').textContent=`${file.name} · ${(file.size/1024/1024).toFixed(2)} MB · Ready to upload`;
-}
+const editPage = id => resourceForm(id, true);
+const uploadPage = id => resourceForm(id);
 // Shared fallback page for invalid routes or missing records.
 function notFound() { return '<main class="main narrow"><div class="panel empty"><h1>Not found</h1><a href="#courses" class="btn">Back to courses</a></div></main>'; }
 // Assistant page placeholder.
 function assistant() { return '<main class="main narrow"><section class="panel"><h1>Assistant</h1><p>The AI assistant is not connected yet.</p></section></main>'; }
 // Account dialog and logout handler.
 function account() {
-  const roleLabel = String(user.role || 'student').toLowerCase() === 'admin' ? 'Admin' : 'Student';
-  $('#dialog-body').innerHTML=`<h2>${esc(user.name)} <span class="role-badge" aria-label="Role: ${roleLabel}">${roleLabel}</span></h2><p>${esc(user.email)}</p><button id="logout-button" class="btn">Log out</button>`;
+  $('#dialog-body').innerHTML = `<h2>${esc(user.name)}</h2><p>${esc(user.email)}</p><button class="btn" id="logout-button">Log out</button>`;
   $('#dialog').showModal();
-  $('#logout-button').onclick=async e=>{
-    e.target.disabled=true;
-    try { await api('/logout',{method:'POST'}); sessionStorage.removeItem('studyswap-access-token'); user=null; courses=[]; resources=[]; purchases.clear(); points=0; pointsHistory=[]; $('#dialog').close(); go('login'); }
-    catch(error){toast(error.message);e.target.disabled=false;}
+  $('#logout-button').onclick = () => {
+    sessionStorage.removeItem('studyswap-access-token'); sessionStorage.removeItem('studyswap-user');
+    user = null; courses = []; resources = []; $('#dialog').close(); go('login');
   };
 }
-function pointsHistoryDialog() {
-  const rows = pointsHistory.length
-    ? pointsHistory.map(item => `
-        <div class="points-history-row">
-          <div>
-            <strong>${esc(item.description || item.reason || 'Points activity')}</strong>
-            <small>${esc(item.created_at ? new Date(item.created_at).toLocaleDateString() : '')}</small>
-          </div>
-          <strong class="${Number(item.amount) < 0 ? 'points-spent' : 'points-earned'}">
-            ${Number(item.amount) > 0 ? '+' : ''}${esc(item.amount)} pts
-          </strong>
-        </div>
-      `).join('')
-    : '<p class="muted">No points activity yet.</p>';
-  $('#dialog-body').innerHTML=`<h2>Points history</h2><p class="muted">A record of where your points were earned or spent.</p><div class="points-history">${rows}</div>`;
-  $('#dialog').showModal();
+
+// Route version prevents an older response from replacing a newer screen.
+let renderVersion = 0;
+function showError(selector, error) {
+  const node = $(selector);
+  if (node) node.textContent = error.message; else toast(error.message);
 }
-// Shared client-side router and page event binding.
-function render() {
-  let [page='home',rawId] = location.hash.slice(1).split('/'); let id;
-  try { id=decodeURIComponent(rawId || ''); } catch { id=''; }
-  if (!user && page !== 'login' && page !== 'signup') {
-    page = 'login';
-  } 
-  else if (
-    user && (!page || page === 'login' || page === 'signup' || page === 'library')
-  ) {
-    page = 'home';
-  }
-  const pages = {
-  home,
-  courses: coursesPage,
-  course: () => coursePage(id),
-  resource: () => resourcePage(id),
-  upload: () => uploadPage(id),
-  edit: () => editPage(id),
-  assistant
-  };
-  if (page === 'login') {
-  $('#app').innerHTML = login();
-  } else if (page === 'signup') {
-  $('#app').innerHTML = signupPage();
-  } else {
-  $('#app').innerHTML = header(page) + (pages[page] || notFound)();
-  }
-  document.title='StudySwap';
-  $('#account-button')?.addEventListener('click',account);
-  $('#points-button')?.addEventListener('click',pointsHistoryDialog);
-  $('#preview-button')?.addEventListener('click',()=>previewDemoPDF(id));
-  $('#download-button')?.addEventListener('click',()=>downloadDemoPDF(id));
-  if(page==='resource') setupResourcePreview(id);
-  if(page==='login') {
-    $('#login-form').onsubmit=async e=>{
-      e.preventDefault(); if(busy)return; busy=true;
-      const button=e.target.querySelector('button'); button.disabled=true; button.textContent='Logging in…';
+function jsonRequest(method, data) {
+  return {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)};
+}
+async function render() {
+  const version = ++renderVersion;
+  let [page = 'home', rawId = ''] = location.hash.slice(1).split('/');
+  let id; try { id = decodeURIComponent(rawId); } catch { id = ''; }
+  if (!user && !['login', 'signup'].includes(page)) page = 'login';
+  if (user && ['login', 'signup', ''].includes(page)) page = 'home';
+  if (['login', 'signup'].includes(page)) {
+    $('#app').innerHTML = page === 'login' ? login() : signupPage();
+    const form = $(page === 'login' ? '#login-form' : '#signup-form');
+    form.onsubmit = async event => {
+      event.preventDefault(); if (busy) return;
+      busy = true; const button = form.querySelector('button'); button.disabled = true;
+      const input = Object.fromEntries(new FormData(form));
+      input.email = input.email.trim().toLowerCase();
+      if (input.name) input.name = input.name.trim();
       try {
-        const form=new FormData(e.target);
-        const result=await api('/login',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({
-            email:String(form.get('email')).trim(),
-            password:form.get('password')
-          })
-        });
-        if(result.access_token) sessionStorage.setItem('studyswap-access-token',result.access_token);
-        await loadData(); go('home');
-      } catch(error) {
-        if($('#login-error')) $('#login-error').textContent=error.message;
-        else toast(error.message);
-      } finally {
-        busy=false; button.disabled=false;button.textContent='Log in';
-      }
+        const result = await api('/' + page, jsonRequest('POST', input));
+        if (page === 'signup') {
+          form.reset();
+          showError('#signup-error', {message: result.requires_email_confirmation ? 'Account created. Confirm your email, then log in.' : 'Account created. You can now log in.'});
+        } else {
+          if (!result.access_token || !result.user?.id) throw new Error('Invalid login response.');
+          sessionStorage.setItem('studyswap-access-token', result.access_token);
+          setProfile(result);
+          sessionStorage.setItem('studyswap-user', JSON.stringify(result.user));
+          go('home');
+        }
+      } catch (error) { showError('#' + page + '-error', error); }
+      finally { busy = false; button.disabled = false; }
     };
-    // Above is the login condition
-
-    // Sign Up Rendering process
-    if(page === 'signup'){
-      $('#signup-form').onsubmit=async e=>{
-      e.preventDefault(); if(busy)return; busy=true;
-      const button=e.target.querySelector('button'); button.disabled=true; button.textContent='Creating account…';
-      try {
-        const form=new FormData(e.target);
-        const result=await api('/signup',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({
-            name:String(form.get('name')).trim(),
-            email:String(form.get('email')).trim(),
-            password:form.get('password')
-          })
-        });
-        e.target.reset();
-        $('#signup-error').textContent=result.requires_email_confirmation
-          ? 'Account created. Check your email to confirm your account, then log in.'
-          : 'Account created successfully. You can now log in.';
-      } catch(error) {
-        if($('#signup-error')) $('#signup-error').textContent=error.message;
-        else toast(error.message);
-      } finally {
-        busy=false; button.disabled=false;button.textContent='Sign up';
-      }
-      };
+    return;
+  }
+  $('#app').innerHTML = header(page) + '<main class="main narrow"><p>Loading…</p></main>';
+  $('#account-button').onclick = account;
+  try {
+    if (['courses', 'upload', 'edit', 'course', 'resource'].includes(page)) {
+      courses = listData(await api('/courses'), 'courses');
     }
-  }
-  if(page==='courses') {
-    showCourses(); $('#course-search').onsubmit=e=>{e.preventDefault();courseQuery=new FormData(e.target).get('q');showCourses();};
-  }
-  if(page==='course' && courseBy(id)) {
-    $('#resource-filter').value=typeFilter; showResources(id);
-    $('#resource-filter').onchange=e=>{typeFilter=e.target.value;showResources(id);};
-    $('#resource-search').oninput=e=>{resourceQuery=e.target.value;showResources(id);};
-  }
-  if(page==='resource') $('#purchase-button')?.addEventListener('click',async e=>{
-    const button=e.target; button.disabled=true;button.textContent='Purchasing…';
-    try {
-      await api(`/resources/${route(id)}/purchase`,{method:'POST'});
-      await loadData();render();toast('Purchased. This course is now on Home.');
-    } catch(error) { if($('#resource-error')) $('#resource-error').textContent=error.message;else toast(error.message); button.disabled=false;button.textContent='Retry purchase'; }
-  });
-  if(page==='upload') {
-    currentFile=null; $('#file').onchange=e=>selectFile(e.target.files[0]);
-    $('#dropzone').ondragover=e=>e.preventDefault();
-    $('#dropzone').ondrop=e=>{e.preventDefault();if(!busy)selectFile(e.dataTransfer.files[0]);};
-    $('#upload-form').onsubmit=async e=>{
-      e.preventDefault();if(busy)return;
-      if(!currentFile){$('#upload-error').textContent='Choose a PDF first.';return;}
-      busy=true; const button=e.target.querySelector('button[type=submit]');button.disabled=true;button.textContent='Uploading…';
-      const data=new FormData(e.target);data.set('file',currentFile);data.set('rights','true');
+    if (page === 'course') await refreshResources(id);
+    if (['resource', 'edit'].includes(page)) {
+      const rows = listData(await api('/resources/' + route(id)), 'resources');
+      resources = resources.filter(r => String(r.id) !== String(id)).concat(rows);
+    }
+    if (version !== renderVersion) return;
+    const pages = {home, courses: coursesPage, course: () => coursePage(id), resource: () => resourcePage(id), upload: () => uploadPage(id), edit: () => editPage(id)};
+    $('#app').innerHTML = header(page) + (pages[page] || notFound)();
+    $('#account-button').onclick = account;
+    if (page === 'courses') {
+      showCourses();
+      $('#course-search').onsubmit = e => {e.preventDefault(); courseQuery = String(new FormData(e.target).get('q')).trim(); showCourses();};
+    }
+    if (page === 'course' && courseBy(id)) {
+      showResources(id);
+      $('#resource-search').oninput = e => {resourceQuery = e.target.value; showResources(id);};
+    }
+    if ($('#resource-form')) $('#resource-form').onsubmit = e => saveResource(e, page === 'edit' ? id : null);
+    if ($('#delete-button')) $('#delete-button').onclick = async e => {
+      if (busy || !window.confirm('Delete this resource? This cannot be undone.')) return;
+      busy = true; const button = e.currentTarget; button.disabled = true;
+      const courseId = resourceBy(id).course_id;
       try {
-        const result=await api('/resources',{method:'POST',body:data});
-        // Clear the submitted file before refreshing, so a refresh error cannot trigger resubmission.
-        currentFile=null; e.target.reset();
-        await loadData(); go('resource/'+route(result.id));toast(CONFIG.mode==='demo'?'PDF saved in this browser. Download it to check the original file.':'PDF uploaded successfully.');
-      } catch(error){ if($('#upload-error')) $('#upload-error').textContent=error.message; else toast(error.message); }
-      finally {busy=false;button.disabled=false;button.textContent='Upload PDF';}
+        await api('/resources/' + route(id), {method: 'DELETE'});
+        resources = resources.filter(r => String(r.id) !== String(id));
+        go('course/' + route(courseId)); toast('Resource deleted.');
+      } catch (error) {showError('#resource-error', error);}
+      finally {busy = false; button.disabled = false;}
     };
+  } catch (error) {
+    if (version !== renderVersion) return;
+    $('#app').innerHTML = header(page) + `<main class="main narrow"><p class="error" role="alert">${esc(error.message)}</p><button class="btn" id="retry-button">Retry</button></main>`;
+    $('#account-button').onclick = account; $('#retry-button').onclick = render;
   }
 }
-// Frontend-only demonstration. No Python server is required in demo mode.
-// When the backend is ready, serve this HTML from FastAPI and set mode to 'api'.
-// In API mode, /login calls the route declared in routers/auth.py (not auth.py as a URL).
-const params = new URLSearchParams(location.search);
-const CONFIG = {
-  mode: params.get('mode') === 'api' ? 'api' : 'demo',
-  apiBase: params.get('apiBase') || 'http://127.0.0.1:8000'
-};
-// Demo data and formatting helpers.
-const shortDescription = c => { const text=String(c?.description || 'Browse notes and study resources.');return text.length>105?text.slice(0,102)+'…':text; };
-const DEMO_USER = {id:'demo-user-1',name:'StudySwap Test User',email:'test@wisc.edu',role:'student'};
-const DEMO_COURSES = [
- {id:1,subject:'STAT',course_number:'340',title:'Data Science Modeling II',description:'Regression, resampling, and model selection.'},
- {id:2,subject:'COMP SCI',course_number:'564',title:'Database Management Systems',description:'SQL, relational databases, and database design.'},
- {id:3,subject:'MATH',course_number:'340',title:'Linear Algebra',description:'Matrices, vector spaces, and eigenvalues.'},
- {id:4,subject:'L I S',course_number:'461',title:'Data and Algorithms: Ethics and Policy',description:'Privacy, fairness, and the use of data.'}
-];
-function demoPDF(label) {
-  // A real, downloadable one-page PDF clearly marked as demonstration content.
-  const clean=String(label).replace(/[^a-zA-Z0-9 .-]/g,'');
-  const stream=`BT /F1 20 Tf 50 760 Td (StudySwap - DEMO RESOURCE) Tj 0 -40 Td /F1 14 Tf (${clean}) Tj 0 -35 Td (This PDF demonstrates the purchase and download interface.) Tj 0 -25 Td (It is not actual course material.) Tj ET`;
-  const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
-  let text='%PDF-1.4\n', offsets=[0];
-  objects.forEach((obj,i)=>{offsets.push(text.length);text+=`${i+1} 0 obj\n${obj}\nendobj\n`;});
-  const start=text.length;text+=`xref\n0 6\n0000000000 65535 f \n`+offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n \n').join('')+`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
-  return new Blob([text],{type:'application/pdf'});
-}
-let databasePromise;
-// Demo persistence layer: IndexedDB database initialization.
-function demoDB() {
- if(!databasePromise) databasePromise=new Promise((resolve,reject)=>{
-  const request=indexedDB.open('StudySwap-Frontend-Demo-v1',1);
-  request.onupgradeneeded=()=>request.result.createObjectStore('data');
-  request.onsuccess=()=>resolve(request.result);
-  request.onerror=()=>reject(new Error('Browser storage is unavailable. Open this HTML in a normal Chrome window.'));
-  request.onblocked=()=>reject(new Error('Close other StudySwap tabs and try again.'));
- });
- return databasePromise;
-}
-// Demo persistence layer: executes a read/write IndexedDB transaction.
-async function demoTransaction(action) {
- const database=await demoDB();
- return new Promise((resolve,reject)=>{
-  const transaction=database.transaction('data','readwrite'),store=transaction.objectStore('data');let result,error;
-  transaction.oncomplete=()=>resolve(result);
-  transaction.onabort=()=>reject(error || new Error('Could not save to browser storage. Check available storage space.'));
-  transaction.onerror=()=>{};
-  const request=store.get('state');
-  request.onsuccess=()=>{
-   try {
-    let state=request.result;
-    if(!state) {
-     const names=['Regression summary','SQL joins practice','Matrices review','Privacy discussion notes'];
-     state={points:120,purchases:[],pointsHistory:[],nextId:5,courses:DEMO_COURSES,resources:DEMO_COURSES.map((c,i)=>({id:i+1,course_id:c.id,title:names[i],resource_type:'Notes',description:'Demo resource for testing the interface.',owner_id:'sample-uploader',price:20,has_file:true,filename:`demo-${i+1}.pdf`}))};
-     state.resources.forEach(r=>store.put(demoPDF(r.title),'file:'+r.id));
-    }
-    result=action(state,store);store.put(state,'state');
-   }catch(e){error=e;transaction.abort();}
-  };
- });
-}
-// Demo authentication state.
-function demoLoggedIn() { return sessionStorage.getItem('studyswap-demo-login')==='yes'; }
-// Demo API implementation for login, courses, resources, purchase, and upload flows.
-async function demoAPI(path,options={}) {
- if(path==='/login') {
-  const input=JSON.parse(options.body);
-  if(input.email.trim().toLowerCase()!==DEMO_USER.email || input.password!=='studyswap123')throw new Error('Demo login: test@wisc.edu / studyswap123');
-  await demoTransaction(()=>null);sessionStorage.setItem('studyswap-demo-login','yes');return {success:true,user:DEMO_USER};
- }
- if(path==='/logout'){sessionStorage.removeItem('studyswap-demo-login');return {success:true};}
- if(!demoLoggedIn())throw new Error('Please log in.');
- if(path==='/resources' && options.method==='POST') {
-  const form=options.body,file=form.get('file');
-  if(!(file instanceof Blob) || file.size===0 || file.size>20*1024*1024 || !file.name.toLowerCase().endsWith('.pdf'))throw new Error('Choose a PDF no larger than 20 MB.');
-  if(await file.slice(0,5).text()!=='%PDF-')throw new Error('The selected file is not a PDF.');
-  const buffer=await file.arrayBuffer();
-  // Fingerprint is optional on older file:// browsers; the file bytes are always saved.
-  const hash=crypto.subtle?Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',buffer))).map(x=>x.toString(16).padStart(2,'0')).join(''):null;
-  return demoTransaction((state,store)=>{
-   if(!state.courses.some(c=>String(c.id)===form.get('course_id')))throw new Error('Select a course.');
-   if(!String(form.get('title')||'').trim())throw new Error('Enter a title.');
-   if(form.get('rights')!=='true')throw new Error('Confirm your permission to share this PDF.');
-   if(hash && state.resources.some(r=>r.hash===hash && r.owner_id===DEMO_USER.id))throw new Error('You have already uploaded this PDF.');
-   const id=state.nextId++;
-   state.resources.push({id,course_id:Number(form.get('course_id')),title:String(form.get('title')).trim(),resource_type:form.get('resource_type'),description:form.get('description')||'',owner_id:DEMO_USER.id,price:20,has_file:true,filename:file.name,size_bytes:file.size,hash});
-   store.put(new Blob([buffer],{type:'application/pdf'}),'file:'+id);return {id};
-  });
- }
- return demoTransaction(state=>{
-  if(path==='/me')return {user:DEMO_USER,points:state.points,purchases:state.purchases,points_history:state.pointsHistory || []};
-  if(path==='/courses')return state.courses;
-  if(path==='/resources')return state.resources;
-  const match=path.match(/^\/resources\/(\d+)\/purchase$/);
-  if(match && options.method==='POST') {
-   const resource=state.resources.find(r=>r.id===Number(match[1]));
-   if(!resource?.has_file)throw new Error('Resource not found.');
-   if(resource.owner_id!==DEMO_USER.id && !state.purchases.some(p=>p.resource_id===resource.id)) {
-    if(state.points<resource.price)throw new Error('Not enough points.');
-    state.points-=resource.price;state.purchases.push({resource_id:resource.id,points_paid:resource.price});
-    (state.pointsHistory ||= []).unshift({amount:-resource.price,description:`Purchased ${resource.title}`,created_at:new Date().toISOString()});
-   }
-   return {success:true,points:state.points};
-  }
-  throw new Error('This action is not available in the frontend demo.');
- });
-}
-// Resource Detail page: downloads a demo PDF from IndexedDB.
-async function getDemoPDFUrl(id, requireAccess=true) {
-  const r=resourceBy(id);
-  if(!r || (requireAccess && (!demoLoggedIn() || !accessible(r)))) throw new Error('Purchase this resource first.');
-  const database=await demoDB();
-  const blob=await new Promise((resolve,reject)=>{
-    const tx=database.transaction('data');
-    const req=tx.objectStore('data').get('file:'+r.id);
-    req.onsuccess=()=>resolve(req.result);
-    req.onerror=()=>reject(new Error('Could not read the saved PDF.'));
-  });
-  if(!blob) throw new Error('This PDF is no longer in browser storage.');
-  return URL.createObjectURL(blob);
-}
-async function setupResourcePreview(id) {
-  const frame=$('#resource-preview iframe');
-  if(!frame) return;
-  const r=resourceBy(id);
-  if(!r) return;
+async function saveResource(event, id) {
+  event.preventDefault(); if (busy) return;
+  const form = event.target, data = new FormData(form);
+  const course = courseBy(data.get('course_id'));
+  if (!course || !String(data.get('title')).trim()) {showError('#form-error', {message: 'Select a course and enter a title.'}); return;}
+  const payload = {title: String(data.get('title')).trim(), course: code(course), resource_type: data.get('resource_type'), description: String(data.get('description') || '').trim(), course_id: Number(course.id)};
+  busy = true; const button = form.querySelector('button[type=submit]'); button.disabled = true;
   try {
-    frame.src=CONFIG.mode==='demo'
-      ? await getDemoPDFUrl(id, false)
-      : ($('#resource-preview').dataset.fileUrl || '');
-  } catch(error) {
-    $('#resource-error').textContent=error.message;
-  }
+    await api(id == null ? '/resources' : '/resources/' + route(id), jsonRequest(id == null ? 'POST' : 'PUT', payload));
+    // Navigate before the GET refresh: a refresh failure must not resubmit a successful write.
+    form.reset(); go('course/' + route(course.id));
+    toast(id == null ? 'Resource created.' : 'Changes saved.');
+  } catch (error) {showError('#form-error', error);}
+  finally {busy = false; button.disabled = false;}
 }
-async function previewDemoPDF(id) {
-  try {
-    const url=await getDemoPDFUrl(id);
-    window.open(url, '_blank', 'noopener');
-    setTimeout(()=>URL.revokeObjectURL(url), 60000);
-  } catch(error) { toast(error.message); }
-}
-async function downloadDemoPDF(id) {
- try {
-  const r=resourceBy(id),url=await getDemoPDFUrl(id);
-  const link=document.createElement('a');link.href=url;link.download=r.filename;document.body.append(link);link.click();link.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),60000);
- }catch(error){toast(error.message);}
-}
-
-// Shared application startup and hash-route refresh.
-window.addEventListener('hashchange',render);
-async function start() {
-  render();
-  if(location.protocol==='file:' && CONFIG.mode==='api') return;
-  try {await loadData();render();}
-  catch(error) {user=null;render();if(!/log in|session expired/i.test(error.message)) $('#login-error').textContent=error.message;}
-}
-start();
-
+window.addEventListener('hashchange', render);
+// Restore only the real login response; the backend must enforce authorization.
+try {
+  const saved = JSON.parse(sessionStorage.getItem('studyswap-user') || 'null');
+  if (saved?.id && sessionStorage.getItem('studyswap-access-token')) setProfile({user: saved});
+} catch {sessionStorage.removeItem('studyswap-user');}
+render();
