@@ -58,7 +58,23 @@ async function refreshResources(courseId) {
 
 // Shared application header shown on authenticated pages.
 function header(page) {
-  return `<header class="header"><a class="brand" href="#home">StudySwap</a><nav class="nav"><a href="#home">Home</a><a href="#courses">Courses</a><a href="#upload">Upload</a></nav><div class="account"><button class="btn" id="account-button">${esc(user.name)}</button></div></header>`;
+  const coursesActive = ['courses', 'course', 'resource', 'edit'].includes(page);
+
+  return `
+    <header class="header">
+      <a class="brand" href="#home">StudySwap</a>
+
+      <nav class="nav">
+        <a href="#home" class="${page === 'home' ? 'active' : ''}">Home</a>
+        <a href="#courses" class="${coursesActive ? 'active' : ''}">Courses</a>
+        <a href="#upload" class="${page === 'upload' ? 'active' : ''}">Upload</a>
+      </nav>
+
+      <div class="account">
+        <button class="btn" id="account-button">${esc(user.name)}</button>
+      </div>
+    </header>
+  `;
 }
 
 // Login page renderer.
@@ -153,12 +169,137 @@ function signupPage(){
 
 // Reusable course card used on the Home page.
 function home() {
-  return `<main class="main narrow"><h1>Welcome, ${esc(user.name)}</h1><div class="panel section"><h2>My courses</h2><p>Purchased courses will appear here when the purchase feature is available.</p><a class="btn dark" href="#courses">Find a course</a></div></main>`;
+  const recentResources = resources.slice(-3).reverse();
+
+  return `
+    <main class="main home-page">
+
+      <section class="home-hero">
+        <div class="home-hero-copy">
+          <p class="eyebrow">UW–MADISON 한인 학습 커뮤니티</p>
+
+          <h1>
+            Study<span>Swap</span>
+          </h1>
+
+          <p class="home-intro">
+            StudySwap은 UW–Madison 학생들이 수업 노트, 스터디 가이드,
+            기출자료 등 학습 자료를 찾고 공유할 수 있는 플랫폼입니다.
+          </p>
+
+          <div class="home-actions">
+            <a class="btn dark home-primary" href="#courses">
+              강의 찾기 →
+            </a>
+
+            <a class="btn home-secondary" href="#upload">
+              자료 업로드
+            </a>
+          </div>
+        </div>
+
+        <div class="home-hero-art">
+          <div class="book-stack">
+            <div class="book">NOTES</div>
+            <div class="book">STUDY GUIDES</div>
+            <div class="book">OLD EXAMS</div>
+          </div>
+
+          <div class="study-icon">
+            <img src="pngegg.png" alt="Bucky Badger">
+          </div>
+        </div>
+      </section>
+
+      <section class="home-feature-grid">
+
+        <a href="#courses" class="home-feature-card">
+          <div class="feature-icon">⌕</div>
+
+          <div>
+            <h3>강의 둘러보기</h3>
+            <p>
+              수강 중인 강의를 검색하고 공유된 학습 자료를 확인해보세요.
+            </p>
+          </div>
+
+          <span>→</span>
+        </a>
+
+        <a href="#upload" class="home-feature-card">
+          <div class="feature-icon">↑</div>
+
+          <div>
+            <h3>자료 업로드하기</h3>
+            <p>
+              강의 노트, 스터디 가이드, 기출자료 등을 다른 학생들과 공유해보세요.
+            </p>
+          </div>
+
+          <span>→</span>
+        </a>
+
+        <div class="home-feature-card">
+          <div class="feature-icon">♡</div>
+
+          <div>
+            <h3>함께 공부하기</h3>
+            <p>
+              유용한 자료를 공유하고 필요한 자료를 찾아 더 효율적으로 공부해보세요.
+            </p>
+          </div>
+        </div>
+
+      </section>
+
+      <section class="home-bottom-grid">
+
+        <div class="panel recent-panel">
+
+          <div class="section-heading">
+            <h2>최근 등록된 자료</h2>
+            <a href="#courses">전체 보기 →</a>
+          </div>
+
+          ${
+            recentResources.length
+              ? recentResources.map(r => `
+                  <a
+                    class="recent-resource-row"
+                    href="#resource/${route(r.id)}"
+                  >
+                    <div>
+                      <strong>${esc(r.title)}</strong>
+                      <p>${esc(r.course || '')}</p>
+                    </div>
+
+                    <span class="tag">
+                      ${
+                        r.resource_type === 'Old exam'
+                          ? '기출문제'
+                          : r.resource_type === 'Study Guide'
+                            ? '스터디 가이드'
+                            : r.resource_type === 'Notes'
+                              ? '강의 노트'
+                              : esc(r.resource_type || '자료')
+                      }
+                    </span>
+                  </a>
+                `).join('')
+              : `<p class="muted">아직 등록된 자료가 없습니다.</p>`
+          }
+
+        </div>
+
+      </section>
+
+    </main>
+  `;
 }
 
 // Courses page: search form and results container.
 function coursesPage() {
-  return `<main class="main narrow"><h1>Find a course</h1><form id="course-search" class="search"><span aria-hidden="true">⌕</span><input name="q" aria-label="Search courses" placeholder="Search by course code or title" value="${esc(courseQuery)}"><button class="btn dark">Search</button></form><p class="muted" id="result-summary"></p><div id="course-results"></div></main>`;
+  return `<main class="main narrow"><h1>강의 찾기</h1><form id="course-search" class="search"><span aria-hidden="true">⌕</span><input name="q" aria-label="Search courses" placeholder="Search by course code or title" value="${esc(courseQuery)}"><button class="btn dark">Search</button></form><p class="muted" id="result-summary"></p><div id="course-results"></div></main>`;
 }
 
 // Courses page: filters and renders matching courses.
@@ -203,7 +344,7 @@ function resourceForm(id, editing = false) {
   if (editing && !r) return notFound();
   const selected = r?.course_id ?? id;
   const types = [...new Set(['Notes','Study guide','Cheatsheet','Practice','Old exam', ...(r?.resource_type ? [r.resource_type] : [])])];
-  return `<main class="main narrow"><section class="panel"><h1>${editing ? 'Edit resource' : 'Upload a resource'}</h1><p>Register resource details. PDF attachments are not available yet.</p><form id="resource-form"><label class="field">Course<select name="course_id" required><option value="">Select a course</option>${courses.map(c => `<option value="${esc(c.id)}" ${String(c.id) === String(selected) ? 'selected' : ''}>${esc(code(c))} — ${esc(c.title)}</option>`).join('')}</select></label><label class="field">Type<select name="resource_type">${types.map(t => `<option ${t === r?.resource_type ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="field">Title<input name="title" required maxlength="150" value="${esc(r?.title || '')}"></label><label class="field">Description<textarea name="description" rows="4">${esc(r?.description || '')}</textarea></label><p id="form-error" class="error" role="alert"></p><button class="btn dark field" type="submit">${editing ? 'Save changes' : 'Create resource'}</button></form></section></main>`;
+  return `<main class="main narrow"><section class="panel"><h1>${editing ? 'Edit resource' : '자료 업로드'}</h1><p>공유할 학습 자료의 정보를 입력해주세요. PDF attachments are not available yet.</p><form id="resource-form"><label class="field">Course<select name="course_id" required><option value="">Select a course</option>${courses.map(c => `<option value="${esc(c.id)}" ${String(c.id) === String(selected) ? 'selected' : ''}>${esc(code(c))} — ${esc(c.title)}</option>`).join('')}</select></label><label class="field">Type<select name="resource_type">${types.map(t => `<option ${t === r?.resource_type ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="field">Title<input name="title" required maxlength="150" value="${esc(r?.title || '')}"></label><label class="field">Description<textarea name="description" rows="4">${esc(r?.description || '')}</textarea></label><p id="form-error" class="error" role="alert"></p><button class="btn dark field" type="submit">${editing ? 'Save changes' : 'Create resource'}</button></form></section></main>`;
 }
 const editPage = id => resourceForm(id, true);
 const uploadPage = id => resourceForm(id);
