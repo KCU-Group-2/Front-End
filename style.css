@@ -1,6 +1,6 @@
-:root{font-family:Arial,Helvetica,sans-serif;color:#17191d;background:#f7f7f9;font-size:16px;--muted:#78808e;--line:#e5e6eb;--red:#c90010}
+:root{color:#17191d;background:#f7f7f9;font-size:16px;--muted:#78808e;--line:#e5e6eb;--red:#c90010}
 *{box-sizing:border-box}
-body{margin:0}
+body{margin:0;font-family: "Manrope", sans-serif;}
 button,input,select,textarea{font:inherit}
 button,a,input,select,textarea{outline-offset:4px}
 button,a{cursor:pointer}
@@ -13,10 +13,10 @@ p{color:#657080;line-height:1.6;margin:0 0 18px}
 small,.muted{color:var(--muted);font-size:14px}
 .brand{display:flex;align-items:center;gap:10px;font-size:23px;font-weight:700;white-space:nowrap}
 .mark{display:inline-grid;place-items:center;background:var(--red);color:white;border-radius:8px;width:32px;height:32px;font-size:18px}
-.header{height:78px;background:white;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 3%;gap:36px}
+.header{height:64px;background:white;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 3%;gap:36px}
 .nav{display:flex;align-self:stretch;gap:30px}
-.nav a{display:flex;align-items:center;border-bottom:3px solid transparent;color:#626975}
-.nav a.active{border-color:#17191d;color:#17191d}
+.nav a{display:flex;align-items:center;border-bottom:2px solid transparent;color:#626975}
+.nav a.active{border-color:#e33b43;color:#17191d;font-weight:600}
 .account{margin-left:auto;display:flex;gap:16px;align-items:center}
 .points{border:1px solid var(--line);background:#f7f7f9;border-radius:24px;padding:9px 15px;font-weight:600;white-space:nowrap}
 .points:before{content:'●';color:#e9a500;margin-right:7px}
@@ -235,3 +235,413 @@ dialog .btn{margin-top:20px}
 .demo{padding:9px 3%}
 
 
+
+
+
+
+/* ===== Home Redesign ===== */
+
+.home-page {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 36px 28px 60px;
+}
+
+.home-hero {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 40px;
+  align-items: center;
+  padding: 48px;
+  border-radius: 28px;
+  background: linear-gradient(135deg, #fff7f4, #fffdfb);
+  border: 1px solid #f0e2df;
+  margin-bottom: 28px;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #c83c3c;
+}
+
+.home-hero h1 {
+  margin: 0;
+  font-size: clamp(42px, 5vw, 64px);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.home-hero h1 span {
+  color: #d93f45;
+}
+
+.home-intro {
+  max-width: 610px;
+  margin: 22px 0 0;
+
+  font-size: 17px;
+  line-height: 1.7;
+  font-weight: 500;
+  color: #657080;
+
+  word-break: keep-all;
+  line-break: strict;
+}
+
+.home-actions {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 28px;
+}
+
+.home-primary,
+.home-secondary {
+  padding: 14px 22px;
+  border-radius: 12px;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.home-secondary {
+  background: white;
+  color: #17191d;
+  border: 1px solid #d9dde5;
+}
+
+.home-hero-art {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 220px;
+  transform: translate(20px, 30px);
+}
+
+.book-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  z-index: 2;
+  transform: rotate(-2deg);
+}
+
+/* 책 본체 */
+.book {
+  position: relative;
+  width: 190px;
+  height: 54px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding-left: 14px;
+  padding-right: 30px;
+
+  border-radius: 6px 15px 15px 5px;
+  border: 1px solid rgba(160, 75, 70, 0.3);
+
+  font-family: "Bebas Neue", sans-serif;
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: #222;
+
+  box-shadow:
+    0 8px 15px rgba(90, 45, 40, 0.11),
+    inset -10px 0 0 rgba(255,255,255,0.18);
+}
+.book::before {
+  content: "";
+  position: absolute;
+  left: 11px;
+  top: 4px;
+  bottom: 4px;
+  width: 5px;
+  border-radius: 4px;
+  background: rgba(110, 40, 38, 0.18);
+}
+.book::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 5px;
+  bottom: 5px;
+  width: 15px;
+  border-radius: 0 10px 10px 0;
+
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      #fffaf2 0 2px,
+      #e9ddd2 2px 3px
+    );
+}
+.book:nth-child(1) {
+  background: linear-gradient(
+    90deg,
+    #cf625d 0 13px,
+    #f1a09b 13px calc(100% - 18px),
+    #f7e9dd calc(100% - 18px)
+  );
+
+  margin-left: 10px;
+  transform: rotate(1deg);
+}
+.book:nth-child(2) {
+  background: linear-gradient(
+    90deg,
+    #d38169 0 13px,
+    #f2bda6 13px calc(100% - 18px),
+    #f7e9dd calc(100% - 18px)
+  );
+
+  margin-top: -3px;
+  margin-left: -4px;
+  transform: rotate(-1deg);
+}
+.book:nth-child(3) {
+  background: linear-gradient(
+    90deg,
+    #c9514c 0 13px,
+    #eb8c85 13px calc(100% - 18px),
+    #f7e9dd calc(100% - 18px)
+  );
+
+  margin-top: -4px;
+  margin-left: 18px;
+  transform: rotate(1deg);
+}
+
+.study-icon {
+  font-size: 54px;
+  padding-bottom: 14px;
+}
+
+.home-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin-bottom: 28px;
+}
+
+.home-feature-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 16px;
+  align-items: center;
+  padding: 22px;
+  border: 1px solid #dde2ea;
+  border-radius: 18px;
+  background: white;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.home-feature-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(0,0,0,0.06);
+}
+
+.feature-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: #fff0f0;
+  font-size: 26px;
+}
+
+.home-feature-card h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.home-feature-card p {
+  margin: 0;
+  color: #6a7482;
+  line-height: 1.45;
+  font-size: 13px;
+}
+
+.home-bottom-grid {
+  display: block;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.section-heading h2 {
+  margin: 0;
+}
+
+.section-heading a {
+  color: #d93f45;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.recent-resource-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 18px 0;
+  border-top: 1px solid #edf0f4;
+  color: inherit;
+  text-decoration: none;
+}
+
+.recent-resource-row strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.recent-resource-row p {
+  margin: 0;
+  color: #7a8491;
+  font-size: 14px;
+}
+
+@media (max-width: 900px) {
+
+  .home-page {
+    padding: 28px 22px 50px;
+  }
+
+  .home-hero {
+    grid-template-columns: minmax(0, 1.15fr) minmax(220px, 0.85fr);
+    gap: 24px;
+    padding: 36px;
+  }
+
+  .studyswap-title {
+    font-size: 48px;
+  }
+
+  .home-intro {
+    font-size: 15px;
+    max-width: 520px;
+  }
+
+  .home-hero-art {
+    min-height: 190px;
+    transform: translate(0, 20px);
+  }
+
+  .book {
+    width: 165px;
+    height: 48px;
+    font-size: 12px;
+  }
+
+  .study-icon img {
+    width: 115px;
+    max-height: 135px;
+  }
+
+  .home-feature-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .home-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+
+  .home-page {
+    padding: 20px 14px 36px;
+  }
+
+  .home-hero {
+    grid-template-columns: 1fr;
+    padding: 28px 22px;
+    gap: 18px;
+  }
+
+  .studyswap-title {
+    font-size: 42px;
+  }
+
+  .home-intro {
+    font-size: 14px;
+  }
+
+  .home-hero-art {
+    min-height: 170px;
+    transform: none;
+    margin-top: 4px;
+  }
+
+  .book {
+    width: 150px;
+    height: 44px;
+  }
+
+  .study-icon img {
+    width: 105px;
+    max-height: 125px;
+  }
+
+  .home-feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.study-icon {
+  position: relative;
+  z-index: 1;
+  margin-left: -28px;
+  transform: translateY(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.study-icon img {
+  width: 135px;
+  max-height: 155px;
+  object-fit: contain;
+  display: block;
+}
+
+.home-hero h1 {
+  font-weight: 800;
+  letter-spacing: -0.045em;
+}
+
+.home-feature-card h3,
+.section-heading h2,
+.brand {
+  font-weight: 700;
+}
+
+.studyswap-title {
+  margin: 0;
+  font-size: clamp(52px, 6vw, 76px);
+  line-height: 1;
+  letter-spacing: -0.05em;
+  font-weight: 800;
+}
+
+.studyswap-title span {
+  color: #df3f46;
+}
