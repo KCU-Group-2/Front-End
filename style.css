@@ -645,3 +645,9 @@ dialog .btn{margin-top:20px}
 .studyswap-title span {
   color: #df3f46;
 }
+
+#toggle-add-course.active-add {
+  background: #fff1f1;
+  border-color: #ef9a9a;
+  color: #d83b3b;
+}

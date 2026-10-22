@@ -169,7 +169,12 @@ function signupPage(){
 
 // Reusable course card used on the Home page.
 function home() {
-  const recentResources = resources.slice(-3).reverse();
+  const twoDaysAgo = Date.now() - (2 * 24 * 60 * 60 * 1000);
+
+  const recentResources = resources
+    .filter(r => new Date(r.created_at).getTime() >= twoDaysAgo)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 3);
 
   return `
     <main class="main home-page">
@@ -189,7 +194,7 @@ function home() {
 
           <div class="home-actions">
             <a class="btn dark home-primary" href="#courses">
-              강의 찾기 →
+              강의 찾기
             </a>
 
             <a class="btn home-secondary" href="#upload">
@@ -223,7 +228,6 @@ function home() {
             </p>
           </div>
 
-          <span>→</span>
         </a>
 
         <a href="#upload" class="home-feature-card">
@@ -236,7 +240,6 @@ function home() {
             </p>
           </div>
 
-          <span>→</span>
         </a>
 
         <div class="home-feature-card">
@@ -277,11 +280,21 @@ function home() {
                       ${
                         r.resource_type === 'Old exam'
                           ? '기출문제'
-                          : r.resource_type === 'Study Guide'
+                          : r.resource_type === 'Study guide'
                             ? '스터디 가이드'
                             : r.resource_type === 'Notes'
                               ? '강의 노트'
-                              : esc(r.resource_type || '자료')
+                              : r.resource_type === 'Practice materials'
+                                ? '연습 자료'
+                                : r.resource_type === 'PPT'
+                                  ? 'ppt'
+                                  : r.resource_type === 'Syllabus'
+                                    ? 'Syllabus'
+                                    : r.resource_type === 'Reading material'
+                                      ? '읽기자료'
+                                      : r.resource_type === 'Lab'
+                                        ? 'Lab 자료'
+                                         : esc(r.resource_type || '자료')
                       }
                     </span>
                   </a>
@@ -299,7 +312,117 @@ function home() {
 
 // Courses page: search form and results container.
 function coursesPage() {
-  return `<main class="main narrow"><h1>강의 찾기</h1><form id="course-search" class="search"><span aria-hidden="true">⌕</span><input name="q" aria-label="Search courses" placeholder="Search by course code or title" value="${esc(courseQuery)}"><button class="btn dark">Search</button></form><p class="muted" id="result-summary"></p><div id="course-results"></div></main>`;
+  return `
+    <main class="main narrow">
+
+      <div class="page-heading">
+        <h1>강의 찾기</h1>
+        <p class="muted">원하는 강의를 검색하거나 새 강의를 추가해보세요.</p>
+      </div>
+
+      <div class="row" style="gap:12px; align-items:stretch;">
+
+        <form
+          id="course-search"
+          class="search"
+          style="flex:1; margin:0;"
+        >
+          <span aria-hidden="true">⌕</span>
+
+          <input
+            name="q"
+            aria-label="Search courses"
+            placeholder="Search by course code or title"
+            value="${esc(courseQuery)}"
+          >
+
+          <button class="btn dark" type="submit">
+            Search
+          </button>
+        </form>
+
+        <button
+          id="toggle-add-course"
+          class="btn"
+          type="button"
+          style="white-space:nowrap;"
+        >
+          + 강의 추가
+        </button>
+
+      </div>
+
+      <section
+        id="add-course-section"
+        class="panel section"
+        style="display:none; margin-top:16px;"
+      >
+        <div class="row between">
+          <div>
+            <h2>새 강의 추가</h2>
+            <p class="muted">찾는 강의가 없다면 직접 추가할 수 있습니다.</p>
+          </div>
+        </div>
+
+        <form id="add-course-form">
+
+          <div class="form-grid section">
+
+            <label>
+              Subject
+              <input
+                name="subject"
+                placeholder="STAT"
+                required
+              >
+            </label>
+
+            <label>
+              Course number
+              <input
+                name="course_number"
+                placeholder="340"
+                required
+              >
+            </label>
+
+          </div>
+
+          <label class="field">
+            Course title
+            <input
+              name="title"
+              placeholder="Data Science Modeling II"
+              required
+            >
+          </label>
+
+          <label class="field">
+            Description
+            <textarea
+              name="description"
+              rows="3"
+              placeholder="Brief course description"
+            ></textarea>
+          </label>
+
+          <p
+            id="course-create-error"
+            class="error"
+          ></p>
+
+          <button class="btn dark" type="submit">
+            Add course
+          </button>
+
+        </form>
+      </section>
+
+      <p class="muted" id="result-summary"></p>
+      <div id="course-results"></div>
+
+    </main>
+  `;
 }
 
 // Courses page: filters and renders matching courses.
@@ -337,15 +460,79 @@ function showResources(id) {
 // Resource Detail page: metadata, purchase button, or download link.
 function resourcePage(id) {
   const r = resourceBy(id); if (!r) return notFound();
-  return `<main class="main narrow"><div class="breadcrumb"><a href="#course/${route(r.course_id)}">${esc(code(courseBy(r.course_id)))}</a></div><section class="panel"><span class="tag">${esc(r.resource_type)}</span><h1 class="section">${esc(r.title)}</h1><p>${esc(r.description)}</p><p>PDF attachment is not available yet.</p><div class="row"><a class="btn" href="#edit/${route(r.id)}">Edit</a><button class="btn redtext" id="delete-button">Delete</button></div><p id="resource-error" class="error" role="alert"></p></section></main>`;
+  return `<main class="main narrow"><div class="breadcrumb"><a href="#course/${route(r.course_id)}">${esc(code(courseBy(r.course_id)))}</a></div><section class="panel"><span class="tag">${esc(r.resource_type)}</span><h1 class="section">${esc(r.title)}</h1><p>${esc(r.description)}</p><div class="row"><a class="btn" href="#edit/${route(r.id)}">Edit</a><button class="btn redtext" id="delete-button">Delete</button></div><p id="resource-error" class="error" role="alert"></p></section></main>`;
 }
 function resourceForm(id, editing = false) {
   const r = editing ? resourceBy(id) : null;
   if (editing && !r) return notFound();
   const selected = r?.course_id ?? id;
-  const types = [...new Set(['Notes','Study guide','Cheatsheet','Practice','Old exam', ...(r?.resource_type ? [r.resource_type] : [])])];
-  return `<main class="main narrow"><section class="panel"><h1>${editing ? 'Edit resource' : '자료 업로드'}</h1><p>공유할 학습 자료의 정보를 입력해주세요. PDF attachments are not available yet.</p><form id="resource-form"><label class="field">Course<select name="course_id" required><option value="">Select a course</option>${courses.map(c => `<option value="${esc(c.id)}" ${String(c.id) === String(selected) ? 'selected' : ''}>${esc(code(c))} — ${esc(c.title)}</option>`).join('')}</select></label><label class="field">Type<select name="resource_type">${types.map(t => `<option ${t === r?.resource_type ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></label><label class="field">Title<input name="title" required maxlength="150" value="${esc(r?.title || '')}"></label><label class="field">Description<textarea name="description" rows="4">${esc(r?.description || '')}</textarea></label><p id="form-error" class="error" role="alert"></p><button class="btn dark field" type="submit">${editing ? 'Save changes' : 'Create resource'}</button></form></section></main>`;
-}
+  const types = [...new Set(['Notes','Study guide','Syllabus','Cheatsheet','Practice exam','Old exam','PPT','Reading material','Lab',...(r?.resource_type ? [r.resource_type] : [])])];
+return `
+  <main class="main narrow">
+
+    <div class="page-heading">
+      <h1>${editing ? 'Edit resource' : '자료 업로드'}</h1>
+      <p>${editing ? '학습 자료의 정보를 수정해주세요.' : '공유할 학습 자료의 정보를 입력해주세요.'}</p>
+    </div>
+
+    <section class="panel">
+      <form id="resource-form">
+
+        <label class="field">
+          Course
+          <select name="course_id" required>
+            <option value="">Select a course</option>
+            ${courses.map(c => `
+              <option
+                value="${esc(c.id)}"
+                ${String(c.id) === String(selected) ? 'selected' : ''}
+              >
+                ${esc(code(c))} — ${esc(c.title)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+
+        <label class="field">
+          Type
+          <select name="resource_type">
+            ${types.map(t => `
+              <option ${t === r?.resource_type ? 'selected' : ''}>
+                ${esc(t)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+
+        <label class="field">
+          Title
+          <input
+            name="title"
+            required
+            maxlength="150"
+            value="${esc(r?.title || '')}"
+          >
+        </label>
+
+        <label class="field">
+          Description
+          <textarea
+            name="description"
+            rows="4"
+          >${esc(r?.description || '')}</textarea>
+        </label>
+
+        <p id="form-error" class="error" role="alert"></p>
+
+        <button class="btn dark field" type="submit">
+          ${editing ? 'Save changes' : 'Create resource'}
+        </button>
+
+      </form>
+    </section>
+
+  </main>
+`;}
 const editPage = id => resourceForm(id, true);
 const uploadPage = id => resourceForm(id);
 // Shared fallback page for invalid routes or missing records.
@@ -406,22 +593,107 @@ async function render() {
   $('#app').innerHTML = header(page) + '<main class="main narrow"><p>Loading…</p></main>';
   $('#account-button').onclick = account;
   try {
-    if (['courses', 'upload', 'edit', 'course', 'resource'].includes(page)) {
-      courses = listData(await api('/courses'), 'courses');
-    }
-    if (page === 'course') await refreshResources(id);
-    if (['resource', 'edit'].includes(page)) {
-      const rows = listData(await api('/resources/' + route(id)), 'resources');
-      resources = resources.filter(r => String(r.id) !== String(id)).concat(rows);
-    }
-    if (version !== renderVersion) return;
+  if (['home', 'courses', 'upload', 'edit', 'course', 'resource'].includes(page)) {
+    courses = listData(await api('/courses'), 'courses');
+  }
+
+  if (page === 'home') {
+    resources = listData(await api('/resources'), 'resources');
+  }
+
+  if (page === 'course') await refreshResources(id);
+
+  if (['resource', 'edit'].includes(page)) {
+    const rows = listData(
+      await api('/resources/' + route(id)),
+      'resources'
+    );
+
+    resources = resources
+      .filter(r => String(r.id) !== String(id))
+      .concat(rows);
+  }
+
+  if (version !== renderVersion) return;
+
+
     const pages = {home, courses: coursesPage, course: () => coursePage(id), resource: () => resourcePage(id), upload: () => uploadPage(id), edit: () => editPage(id)};
     $('#app').innerHTML = header(page) + (pages[page] || notFound)();
     $('#account-button').onclick = account;
+
     if (page === 'courses') {
       showCourses();
-      $('#course-search').onsubmit = e => {e.preventDefault(); courseQuery = String(new FormData(e.target).get('q')).trim(); showCourses();};
-    }
+
+      const toggleAddCourse = $('#toggle-add-course');
+      const addCourseSection = $('#add-course-section');
+
+      toggleAddCourse.onclick = () => {
+        const isOpen = addCourseSection.style.display === 'block';
+
+        addCourseSection.style.display = isOpen ? 'none' : 'block';
+
+        if (isOpen) {
+           toggleAddCourse.textContent = '+ 강의 추가';
+           toggleAddCourse.classList.remove('active-add');
+        } else {
+          toggleAddCourse.textContent = '접기';
+          toggleAddCourse.classList.add('active-add');
+        }
+    };
+      
+      $('#course-search').onsubmit = e => {
+         e.preventDefault();
+         courseQuery = new FormData(e.target).get('q');
+         showCourses();
+      };
+
+      $('#add-course-form').onsubmit = async e => {
+        e.preventDefault();
+
+        if (busy) return;
+        busy = true;
+
+        const button = e.target.querySelector('button[type="submit"]');
+        button.disabled = true;
+        button.textContent = 'Adding…';
+
+        try {
+          const form = new FormData(e.target);
+
+          const result = await api('/courses', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              subject: String(form.get('subject')).trim(),
+              course_number: String(form.get('course_number')).trim(),
+              title: String(form.get('title')).trim(),
+              description: String(form.get('description') || '').trim()
+          })
+        });
+
+        const createdCourse = Array.isArray(result) ? result[0] : result;
+
+        courses = await api('/courses');
+
+        toast('Course added successfully.');
+
+        if (createdCourse?.id) {
+          go('course/' + route(createdCourse.id));} 
+          else {render();}
+
+      } catch(error) {
+        $('#course-create-error').textContent = error.message;
+      } finally {
+        busy = false;
+        button.disabled = false;
+        button.textContent = 'Add course';   
+      }
+    };
+  }
+
+    
     if (page === 'course' && courseBy(id)) {
       showResources(id);
       $('#resource-search').oninput = e => {resourceQuery = e.target.value; showResources(id);};
@@ -465,4 +737,4 @@ try {
   const saved = JSON.parse(sessionStorage.getItem('studyswap-user') || 'null');
   if (saved?.id && sessionStorage.getItem('studyswap-access-token')) setProfile({user: saved});
 } catch {sessionStorage.removeItem('studyswap-user');}
-render();
+render().catch(console.error);
