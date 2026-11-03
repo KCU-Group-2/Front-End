@@ -518,10 +518,20 @@ return `
           Description
           <textarea
             name="description"
-            rows="4"
+            rows="3"
+            placeholder="Optional"
           >${esc(r?.description || '')}</textarea>
         </label>
 
+        <label class="field">
+          PDF File
+          <input
+            type="file"
+            id="pdf-file"
+            name="pdf_file"
+            accept="application/pdf"
+          >
+        </label>
         <p id="form-error" class="error" role="alert"></p>
 
         <button class="btn dark field" type="submit">
