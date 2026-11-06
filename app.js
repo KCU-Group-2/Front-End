@@ -459,9 +459,108 @@ function showResources(id) {
 
 // Resource Detail page: metadata, purchase button, or download link.
 function resourcePage(id) {
-  const r = resourceBy(id); if (!r) return notFound();
-  return `<main class="main narrow"><div class="breadcrumb"><a href="#course/${route(r.course_id)}">${esc(code(courseBy(r.course_id)))}</a></div><section class="panel"><span class="tag">${esc(r.resource_type)}</span><h1 class="section">${esc(r.title)}</h1><p>${esc(r.description)}</p><div class="row"><a class="btn" href="#edit/${route(r.id)}">Edit</a><button class="btn redtext" id="delete-button">Delete</button></div><p id="resource-error" class="error" role="alert"></p></section></main>`;
+  const r = resourceBy(id);
+  if (!r) return notFound();
+
+  return `
+    <main class="main narrow">
+
+      <div class="breadcrumb">
+        <a href="#course/${route(r.course_id)}">
+          ${esc(code(courseBy(r.course_id)))}
+        </a>
+      </div>
+
+      <section class="panel">
+        <span class="tag">${esc(r.resource_type)}</span>
+
+        <h1 class="section">
+          ${esc(r.title)}
+        </h1>
+
+        <p>${esc(r.description || '')}</p>
+
+        <div class="row">
+          <a class="btn" href="#edit/${route(r.id)}">Edit</a>
+          <button class="btn redtext" id="delete-button">
+            Delete
+          </button>
+        </div>
+
+        <p id="resource-error" class="error" role="alert"></p>
+      </section>
+
+
+      <div class="chatbot-wrapper">
+        <button
+          type="button"
+          id="chatbot-toggle"
+          class="chatbot-toggle"
+          aria-label="챗봇 열기"
+        >
+          <span class="chatbot-face">
+            <span class="chatbot-eye"></span>
+            <span class="chatbot-eye"></span>
+            <span class="chatbot-smile"></span>
+          </span>
+
+          <span class="chatbot-badge">Ask Me!</span>
+        </button>
+
+      <section
+        id="chatbot-window"
+        class="chatbot-window"
+        hidden
+      >
+        <div class="chatbot-header">
+          <div>
+            <strong>Ask Me!</strong>
+            <small>현재 자료를 기반으로 답변합니다.</small>
+          </div>
+
+          <button
+            type="button"
+            id="chatbot-close"
+            class="chatbot-close"
+            aria-label="Close chatbot"
+          >
+            ✕
+          </button> 
+        </div> 
+        
+        <div id="chat-messages" class="chat-messages">
+          <div class="chat-message bot-message">
+            이 자료에 대해 궁금한 내용을 질문해보세요!
+          </div>
+        </div>
+
+        <form id="chat-form" class="chat-form">
+          <input
+            type="text"
+            id="chat-input"
+            name="question"
+            placeholder="무엇이 궁금한가요?"
+            autocomplete="off"
+            required
+          >
+
+          <button
+            class="chat-send"
+            type="submit"
+            aria-label="Send question"
+          >
+            ↑
+          </button>
+        </form>
+
+      </section>
+
+    </div>
+
+  </main>
+  `;
 }
+
 function resourceForm(id, editing = false) {
   const r = editing ? resourceBy(id) : null;
   if (editing && !r) return notFound();
@@ -720,6 +819,82 @@ async function render() {
       } catch (error) {showError('#resource-error', error);}
       finally {busy = false; button.disabled = false;}
     };
+    if ($('#chatbot-toggle')) {
+      const chatbotToggle = $('#chatbot-toggle');
+      const chatbotWindow = $('#chatbot-window');
+      const chatbotClose = $('#chatbot-close');
+
+      chatbotToggle.onclick = () => {
+        chatbotWindow.hidden = false;
+        chatbotToggle.style.display = 'none';
+      };
+
+      chatbotClose.onclick = () => {
+        chatbotWindow.hidden = true;
+        chatbotToggle.style.display = 'flex';
+      };
+    }
+    const chatForm = $('#chat-form');
+    const chatInput = $('#chat-input');
+    const chatMessages = $('#chat-messages');
+
+    if (chatForm && chatInput && chatMessages) {
+      chatForm.onsubmit = async e => {
+        e.preventDefault();
+
+        const question = chatInput.value.trim();
+        if (!question) return;
+
+        // 사용자 메시지
+        const userMessage = document.createElement('div');
+        userMessage.className = 'chat-message user-message';
+        userMessage.textContent = question;
+
+        chatMessages.appendChild(userMessage);
+
+        chatInput.value = '';
+
+        // 답변 대기 메시지
+        const botMessage = document.createElement('div');
+        botMessage.className = 'chat-message bot-message';
+        botMessage.textContent = '답변을 준비하고 있습니다...';
+        botMessage.classList.add('loading-message');
+
+        chatMessages.appendChild(botMessage);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+
+        // 질문 중에는 입력창/버튼 잠시 비활성화
+        const sendButton = chatForm.querySelector('button[type="submit"]');
+        chatInput.disabled = true;
+        sendButton.disabled = true;
+
+        try {
+          const result = await api(
+            '/resources/' + route(id) + '/ask',
+            jsonRequest('POST', {
+              question: question
+            })
+          );
+
+          botMessage.textContent =
+            result.answer || '답변을 불러오지 못했습니다.';
+
+        } catch (error) {
+          botMessage.textContent =
+            '답변을 불러오는 중 오류가 발생했습니다.';
+
+          console.error(error);
+
+        } finally {
+          chatInput.disabled = false;
+          sendButton.disabled = false;
+
+          chatInput.focus();
+
+          chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+      };
+    }
   } catch (error) {
     if (version !== renderVersion) return;
     $('#app').innerHTML = header(page) + `<main class="main narrow"><p class="error" role="alert">${esc(error.message)}</p><button class="btn" id="retry-button">Retry</button></main>`;
