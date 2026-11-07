@@ -541,10 +541,12 @@ function resourcePage(id) {
         class="chatbot-window"
         hidden
       >
+        <div id="chatbot-resize" class="chatbot-resize"></div>
+
         <div class="chatbot-header">
           <div>
             <strong>Ask Me!</strong>
-            <small>현재 자료를 기반으로 답변합니다.</small>
+            <small>해당 자료를 기반으로 답변합니다.</small>
           </div>
 
           <button
@@ -558,7 +560,7 @@ function resourcePage(id) {
         </div> 
         
         <div id="chat-messages" class="chat-messages">
-          <div class="chat-message bot-message">
+          <div class="chat-message bot-message intro-message">
             이 자료에 대해 궁금한 내용을 질문해보세요!
           </div>
         </div>
@@ -902,6 +904,7 @@ async function render() {
       const chatbotToggle = $('#chatbot-toggle');
       const chatbotWindow = $('#chatbot-window');
       const chatbotClose = $('#chatbot-close');
+      const chatbotResize = $('#chatbot-resize');
 
       chatbotToggle.onclick = () => {
         chatbotWindow.hidden = false;
@@ -912,10 +915,95 @@ async function render() {
         chatbotWindow.hidden = true;
         chatbotToggle.style.display = 'flex';
       };
+
+      if (chatbotResize) {
+        chatbotResize.onmousedown = e => {
+          e.preventDefault();
+
+          const startX = e.clientX;
+          const startY = e.clientY;
+
+          const startWidth = chatbotWindow.offsetWidth;
+          const startHeight = chatbotWindow.offsetHeight;
+
+          const startRight = parseFloat(
+            getComputedStyle(chatbotWindow).right
+          );
+
+          const startBottom = parseFloat(
+            getComputedStyle(chatbotWindow).bottom
+          );
+
+          function resizeChatbot(event) {
+            const deltaX = startX - event.clientX;
+            const deltaY = startY - event.clientY;
+
+            const newWidth = Math.min(
+              700,
+              Math.max(
+                320,
+                startWidth + deltaX
+              )
+            );
+
+            const newHeight = Math.min(
+              800,
+              Math.max(
+                420,
+                startHeight + deltaY
+              )
+            );
+
+            chatbotWindow.style.width =
+              newWidth + 'px';
+
+            chatbotWindow.style.height =
+              newHeight + 'px';
+
+            chatbotWindow.style.right =
+              startRight + 'px';
+
+            chatbotWindow.style.bottom =
+              startBottom + 'px';
+          }
+
+          function stopResize() {
+            document.removeEventListener(
+              'mousemove',
+              resizeChatbot
+            );
+
+            document.removeEventListener(
+              'mouseup',
+              stopResize
+            );
+          }
+
+          document.addEventListener(
+            'mousemove',
+            resizeChatbot
+          );
+
+          document.addEventListener(
+            'mouseup',
+            stopResize
+          );
+        };
+      }
+
     }
     const chatForm = $('#chat-form');
     const chatInput = $('#chat-input');
     const chatMessages = $('#chat-messages');
+
+   function formatChatbotAnswer(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>');
+  }
 
     if (chatForm && chatInput && chatMessages) {
       chatForm.onsubmit = async e => {
@@ -936,16 +1024,20 @@ async function render() {
         // 답변 대기 메시지
         const botMessage = document.createElement('div');
         botMessage.className = 'chat-message bot-message';
-        botMessage.textContent = '답변을 준비하고 있습니다...';
+        botMessage.innerHTML = '답변을 준비하고 있습니다...';
         botMessage.classList.add('loading-message');
 
         chatMessages.appendChild(botMessage);
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
         // 질문 중에는 입력창/버튼 잠시 비활성화
-        const sendButton = chatForm.querySelector('button[type="submit"]');
+        const sendButton = chatForm.querySelector('.chat-send');
+
         chatInput.disabled = true;
-        sendButton.disabled = true;
+
+        if (sendButton) {
+          sendButton.disabled = true;
+        }
 
         try {
           const result = await api(
@@ -955,10 +1047,14 @@ async function render() {
             })
           );
 
-          botMessage.textContent =
-            result.answer || '답변을 불러오지 못했습니다.';
+          botMessage.classList.remove('loading-message');
 
+          botMessage.innerHTML =
+            formatChatbotAnswer(
+              result.answer || '답변을 불러오지 못했습니다.'
+            );
         } catch (error) {
+          botMessage.classList.remove('loading-message');
           botMessage.textContent =
             '답변을 불러오는 중 오류가 발생했습니다.';
 
@@ -966,7 +1062,9 @@ async function render() {
 
         } finally {
           chatInput.disabled = false;
-          sendButton.disabled = false;
+          if (sendButton) {
+            sendButton.disabled = false;
+          }
 
           chatInput.focus();
 
