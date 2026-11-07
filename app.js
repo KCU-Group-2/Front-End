@@ -480,11 +480,40 @@ function resourcePage(id) {
 
         <p>${esc(r.description || '')}</p>
 
+        <p class="muted">
+          Uploaded by ${esc(r.uploader || 'Anonymous')}
+        </p>
+
         <div class="row">
-          <a class="btn" href="#edit/${route(r.id)}">Edit</a>
-          <button class="btn redtext" id="delete-button">
+
+          ${
+            r.has_pdf
+              ? `
+                <button
+                  class="btn"
+                  id="open-pdf-button"
+                  type="button"
+                >
+                  Open PDF
+                </button>
+              `
+              : ''
+          }
+
+          <a
+            class="btn"
+            href="#edit/${route(r.id)}"
+          >
+            Edit
+          </a>
+
+          <button
+            class="btn redtext"
+            id="delete-button"
+          >
             Delete
           </button>
+
         </div>
 
         <p id="resource-error" class="error" role="alert"></p>
@@ -624,11 +653,13 @@ return `
 
         <label class="field">
           PDF File
+
           <input
             type="file"
             id="pdf-file"
             name="pdf_file"
             accept="application/pdf"
+            ${editing ? '' : 'required'}
           >
         </label>
         <p id="form-error" class="error" role="alert"></p>
@@ -819,6 +850,54 @@ async function render() {
       } catch (error) {showError('#resource-error', error);}
       finally {busy = false; button.disabled = false;}
     };
+
+    const openPdfButton = $('#open-pdf-button');
+
+    if (openPdfButton) {
+
+      openPdfButton.onclick = async () => {
+
+        // popup blocker를 피하려고
+        // 클릭 즉시 빈 탭을 먼저 연다.
+        const newTab = window.open(
+          'about:blank',
+          '_blank'
+        );
+
+        try {
+
+          const result = await api(
+            '/resources/' +
+            route(id) +
+            '/pdf'
+          );
+
+          if (!result.url) {
+            throw new Error(
+              'The server did not return a PDF URL.'
+            );
+          }
+
+          if (newTab) {
+            newTab.location.href = result.url;
+          } else {
+            window.location.href = result.url;
+          }
+
+        } catch (error) {
+
+          if (newTab) {
+            newTab.close();
+          }
+
+          showError(
+            '#resource-error',
+            error
+          );
+        }
+      };
+    }
+
     if ($('#chatbot-toggle')) {
       const chatbotToggle = $('#chatbot-toggle');
       const chatbotWindow = $('#chatbot-window');
@@ -902,19 +981,184 @@ async function render() {
   }
 }
 async function saveResource(event, id) {
-  event.preventDefault(); if (busy) return;
-  const form = event.target, data = new FormData(form);
-  const course = courseBy(data.get('course_id'));
-  if (!course || !String(data.get('title')).trim()) {showError('#form-error', {message: 'Select a course and enter a title.'}); return;}
-  const payload = {title: String(data.get('title')).trim(), course: code(course), resource_type: data.get('resource_type'), description: String(data.get('description') || '').trim(), course_id: Number(course.id)};
-  busy = true; const button = form.querySelector('button[type=submit]'); button.disabled = true;
+
+  event.preventDefault();
+
+  if (busy) return;
+
+
+  const form = event.target;
+
+  const data = new FormData(form);
+
+  const course = courseBy(
+    data.get('course_id')
+  );
+
+
+  if (
+    !course ||
+    !String(
+      data.get('title')
+    ).trim()
+  ) {
+
+    showError(
+      '#form-error',
+      {
+        message:
+          'Select a course and enter a title.'
+      }
+    );
+
+    return;
+  }
+
+
+  const payload = {
+
+    title:
+      String(
+        data.get('title')
+      ).trim(),
+
+    course:
+      code(course),
+
+    resource_type:
+      data.get(
+        'resource_type'
+      ),
+
+    description:
+      String(
+        data.get('description') || ''
+      ).trim(),
+
+    course_id:
+      Number(course.id)
+  };
+
+
+  busy = true;
+
+  const button =
+    form.querySelector(
+      'button[type=submit]'
+    );
+
+  button.disabled = true;
+
+
   try {
-    await api(id == null ? '/resources' : '/resources/' + route(id), jsonRequest(id == null ? 'POST' : 'PUT', payload));
-    // Navigate before the GET refresh: a refresh failure must not resubmit a successful write.
-    form.reset(); go('course/' + route(course.id));
-    toast(id == null ? 'Resource created.' : 'Changes saved.');
-  } catch (error) {showError('#form-error', error);}
-  finally {busy = false; button.disabled = false;}
+
+    // 새 Resource 생성
+    if (id == null) {
+
+      const pdf =
+        data.get('pdf_file');
+
+
+      if (
+        !(pdf instanceof File) ||
+        pdf.size === 0
+      ) {
+
+        throw new Error(
+          'Please select a PDF file.'
+        );
+      }
+
+
+      const uploadData =
+        new FormData();
+
+
+      uploadData.append(
+        'title',
+        payload.title
+      );
+
+      uploadData.append(
+        'course',
+        payload.course
+      );
+
+      uploadData.append(
+        'resource_type',
+        payload.resource_type
+      );
+
+      uploadData.append(
+        'description',
+        payload.description
+      );
+
+      uploadData.append(
+        'course_id',
+        String(payload.course_id)
+      );
+
+      uploadData.append(
+        'pdf_file',
+        pdf
+      );
+
+
+      await api(
+        '/resources/upload',
+        {
+          method: 'POST',
+          body: uploadData
+        }
+      );
+
+    }
+
+    // 기존 Resource 수정
+    else {
+
+      await api(
+        '/resources/' +
+        route(id),
+
+        jsonRequest(
+          'PUT',
+          payload
+        )
+      );
+    }
+
+
+    form.reset();
+
+
+    go(
+      'course/' +
+      route(course.id)
+    );
+
+
+    toast(
+      id == null
+        ? 'Resource and PDF uploaded successfully.'
+        : 'Changes saved.'
+    );
+
+
+  } catch (error) {
+
+    showError(
+      '#form-error',
+      error
+    );
+
+  } finally {
+
+    busy = false;
+
+    button.disabled = false;
+  }
 }
 window.addEventListener('hashchange', render);
 // Restore only the real login response; the backend must enforce authorization.
