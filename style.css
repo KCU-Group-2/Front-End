@@ -1094,3 +1094,12 @@ select {
   opacity: 1;
   border-color: #7d8aa5;
 }
+/* Course resource requests */
+.request-toolbar{margin:20px 0;display:flex;justify-content:flex-end}
+.request-toolbar label{display:flex;align-items:center;gap:12px}
+.request-toolbar select{width:auto}
+.request-card{margin:14px 0}
+.request-content{white-space:pre-wrap;overflow-wrap:anywhere;margin:18px 0;color:#303744}
+.request-context{margin-bottom:22px}
+.request-board textarea{width:100%}
+@media(max-width:600px){.request-card{padding:20px}.request-toolbar{justify-content:flex-start}}

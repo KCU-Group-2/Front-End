@@ -1,6 +1,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let user = null, courses = [], resources = [];
+let requestRows = [], requestLoadError = '', uploadRequest = null;
 let courseQuery = '', resourceQuery = '', busy = false;
 // Shared data helpers used by multiple pages.
 const courseBy = id => courses.find(c => String(c.id) === String(id));
@@ -447,7 +448,69 @@ function resourceRow(r) {
 // Course Detail page: resources, filters, and upload link.
 function coursePage(id) {
   const c = courseBy(id); if (!c) return notFound();
-  return `<main class="main narrow"><div class="breadcrumb"><a href="#courses">Courses</a> / ${esc(code(c))}</div><div class="row between page-heading"><div><h1>${esc(code(c))}</h1><p>${esc(shortDescription(c))}</p></div><a class="btn dark" href="#upload/${route(c.id)}">Upload for this course</a></div><div class="section-title"><h2>Resources</h2><select id="resource-filter" aria-label="Filter resources" style="width:auto"><option>All</option></select></div><div class="search"><input id="resource-search" aria-label="Search resources" placeholder="Search resources" value="${esc(resourceQuery)}"></div><div class="panel list" id="resource-results"></div></main>`;
+  return `<main class="main narrow"><div class="breadcrumb"><a href="#courses">Courses</a> / ${esc(code(c))}</div><div class="row between page-heading"><div><h1>${esc(code(c))}</h1><p>${esc(shortDescription(c))}</p></div><a class="btn dark" href="#upload/${route(c.id)}">Upload for this course</a></div><div class="section-title"><h2>Resources</h2><select id="resource-filter" aria-label="Filter resources" style="width:auto"><option>All</option></select></div><div class="search"><input id="resource-search" aria-label="Search resources" placeholder="Search resources" value="${esc(resourceQuery)}"></div><div class="panel list" id="resource-results"></div>${requestBoard()}</main>`;
+}
+
+// Course-specific request board. User identities remain anonymous as in the API.
+function requestBoard() {
+  return `<section class="section request-board" aria-labelledby="requests-heading">
+    <div class="section-title"><h2 id="requests-heading">자료 요청 게시판</h2></div>
+    <p>필요한 자료를 요청하거나, 다른 학생의 요청에 자료를 올려주세요.</p>
+    <form id="request-form" class="panel">
+      <label class="field">요청 내용<textarea name="content" required rows="3" placeholder="Midterm 2 practice problems 있으신 분 올려주세요."></textarea></label>
+      <p id="request-error" class="error" role="alert"></p>
+      <button class="btn dark" type="submit">요청 등록</button>
+    </form>
+    <div class="request-toolbar"><label>상태 <select id="request-filter"><option value="all">전체</option><option value="open">요청 중</option><option value="fulfilled">해결됨</option></select></label></div>
+    <div id="request-results" aria-live="polite"></div>
+  </section>`;
+}
+async function loadRequests(courseId) {
+  try {
+    requestRows = listData(await api('/courses/' + route(courseId) + '/requests'), 'requests');
+    requestLoadError = '';
+  } catch (error) { requestRows = []; requestLoadError = error.message; }
+}
+function showRequests() {
+  const node = $('#request-results');
+  if (!node) return;
+  if (requestLoadError) {
+    node.innerHTML = `<p class="error" role="alert">${esc(requestLoadError)}</p><button class="btn" id="retry-requests">다시 불러오기</button>`;
+    $('#retry-requests').onclick = () => render();
+    return;
+  }
+  const filter = $('#request-filter').value;
+  const rows = requestRows.filter(r => filter === 'all' || (filter === 'fulfilled' ? r.status === 'fulfilled' : r.status !== 'fulfilled'));
+  node.innerHTML = rows.map(r => {
+    const done = r.status === 'fulfilled';
+    const date = new Date(r.created_at);
+    return `<article class="panel request-card">
+      <div class="row between wrap"><span class="tag ${done ? 'green' : 'amber'}">${done ? '해결됨' : '요청 중'}</span><small>${esc(r.requester || 'Anonymous')}${Number.isNaN(date.getTime()) ? '' : ' · ' + esc(date.toLocaleDateString())}</small></div>
+      <p class="request-content">${esc(r.content)}</p>
+      ${done ? (r.fulfilled_resource_id != null ? `<a class="btn" href="#resource/${route(r.fulfilled_resource_id)}">업로드된 자료 보기</a>` : '<small>연결된 자료가 없습니다.</small>') : `<a class="btn dark" href="#upload/${route(r.course_id)}/${route(r.id)}">자료 올리기</a>`}
+    </article>`;
+  }).join('') || '<div class="panel empty">해당하는 요청이 없습니다.</div>';
+}
+function bindRequests(courseId) {
+  showRequests();
+  $('#request-filter').onchange = showRequests;
+  $('#request-form').onsubmit = async e => {
+    e.preventDefault();
+    const form = e.currentTarget, button = form.querySelector('button');
+    if (button.disabled) return;
+    const content = String(new FormData(form).get('content') || '').trim();
+    if (!content) { showError('#request-error', new Error('요청 내용을 입력해주세요.')); return; }
+    button.disabled = true;
+    $('#request-error').textContent = '';
+    try {
+      await api('/courses/' + route(courseId) + '/requests', jsonRequest('POST', {content}));
+      form.reset();
+      await loadRequests(courseId);
+      if ($('#request-form') === form) showRequests();
+      toast('자료 요청이 등록되었습니다.');
+    } catch (error) { if ($('#request-form') === form) showError('#request-error', error); }
+    finally { button.disabled = false; }
+  };
 }
 
 // Course Detail page: filters the fetched course resources by title.
@@ -481,7 +544,7 @@ function resourcePage(id) {
         <p>${esc(r.description || '')}</p>
 
         <p class="muted">
-          Uploaded by ${esc(r.uploader || 'Anonymous')}
+          Uploaded by Anonymous
         </p>
 
         <div class="row">
@@ -605,8 +668,10 @@ return `
       <p>${editing ? '학습 자료의 정보를 수정해주세요.' : '공유할 학습 자료의 정보를 입력해주세요.'}</p>
     </div>
 
+    ${!editing && uploadRequest ? `<aside class="panel request-context"><strong>자료 요청에 답변하기 · ${esc(code(courseBy(uploadRequest.course_id)))}</strong><p class="request-content">${esc(uploadRequest.content)}</p><p>PDF 업로드 후 이 요청이 해결됨으로 표시됩니다.</p><a href="#course/${route(uploadRequest.course_id)}">요청 게시판으로 돌아가기</a></aside>` : ''}
     <section class="panel">
       <form id="resource-form">
+        <p class="muted">업로더는 다른 사용자에게 Anonymous로 표시됩니다. 관리자에게는 계정 식별 정보가 보관됩니다.</p>
 
         <label class="field">
           Course
@@ -616,6 +681,7 @@ return `
               <option
                 value="${esc(c.id)}"
                 ${String(c.id) === String(selected) ? 'selected' : ''}
+                ${!editing && uploadRequest && String(c.id) !== String(selected) ? 'disabled' : ''}
               >
                 ${esc(code(c))} — ${esc(c.title)}
               </option>
@@ -743,7 +809,18 @@ async function render() {
     resources = listData(await api('/resources'), 'resources');
   }
 
-  if (page === 'course') await refreshResources(id);
+  uploadRequest = null;
+  if (page === 'course') {
+    await refreshResources(id);
+    await loadRequests(id);
+  }
+  if (page === 'upload' && location.hash.slice(1).split('/')[2]) {
+    const requestId = decodeURIComponent(location.hash.slice(1).split('/')[2]);
+    const rows = listData(await api('/courses/' + route(id) + '/requests'), 'requests');
+    uploadRequest = rows.find(r => String(r.id) === requestId && String(r.course_id) === String(id));
+    if (!uploadRequest) throw new Error('자료 요청을 찾을 수 없습니다.');
+    if (uploadRequest.status === 'fulfilled') throw new Error('이미 해결된 요청입니다. Course 게시판에서 연결된 자료를 확인해주세요.');
+  }
 
   if (['resource', 'edit'].includes(page)) {
     const rows = listData(
@@ -838,6 +915,7 @@ async function render() {
     
     if (page === 'course' && courseBy(id)) {
       showResources(id);
+      bindRequests(id);
       $('#resource-search').oninput = e => {resourceQuery = e.target.value; showResources(id);};
     }
     if ($('#resource-form')) $('#resource-form').onsubmit = e => saveResource(e, page === 'edit' ? id : null);
@@ -1088,17 +1166,18 @@ async function saveResource(event, id) {
   const form = event.target;
 
   const data = new FormData(form);
+  const respondingTo = id == null ? uploadRequest : null;
 
   const course = courseBy(
-    data.get('course_id')
+    respondingTo?.course_id ?? data.get('course_id')
   );
 
 
   if (
     !course ||
-    !String(
+    (!form.dataset.uploadedResourceId && !String(
       data.get('title')
-    ).trim()
+    ).trim())
   ) {
 
     showError(
@@ -1138,7 +1217,12 @@ async function saveResource(event, id) {
   };
 
 
+  if (respondingTo && String(course.id) !== String(respondingTo.course_id)) {
+    showError('#form-error', new Error('요청과 같은 Course에 업로드해주세요.'));
+    return;
+  }
   busy = true;
+  $('#form-error').textContent = '';
 
   const button =
     form.querySelector(
@@ -1151,7 +1235,7 @@ async function saveResource(event, id) {
   try {
 
     // 새 Resource 생성
-    if (id == null) {
+    if (id == null && !form.dataset.uploadedResourceId) {
 
       const pdf =
         data.get('pdf_file');
@@ -1203,18 +1287,25 @@ async function saveResource(event, id) {
       );
 
 
-      await api(
+      const uploaded = await api(
         '/resources/upload',
         {
           method: 'POST',
           body: uploadData
         }
       );
+      if (respondingTo) {
+        const row = listData(uploaded, 'resources')[0];
+        if (row?.id == null) throw new Error('업로드 응답에 자료 ID가 없습니다. Course에서 업로드 결과를 확인해주세요.');
+        form.dataset.uploadedResourceId = String(row.id);
+        // Keep the uploaded ID when fulfillment fails, so retry never reuploads the PDF.
+        form.querySelectorAll('input, select, textarea').forEach(el => el.disabled = true);
+      }
 
     }
 
     // 기존 Resource 수정
-    else {
+    else if (id != null) {
 
       await api(
         '/resources/' +
@@ -1228,6 +1319,15 @@ async function saveResource(event, id) {
     }
 
 
+    if (respondingTo) {
+      try {
+        await api('/requests/' + route(respondingTo.id) + '/fulfill',
+          jsonRequest('PATCH', {resource_id: Number(form.dataset.uploadedResourceId)}));
+      } catch (error) {
+        button.textContent = '요청 연결 다시 시도';
+        throw new Error('자료 업로드는 완료되었습니다. 요청 연결에 실패했습니다: ' + error.message + ' 아래 버튼으로 연결만 다시 시도해주세요.');
+      }
+    }
     form.reset();
 
 
@@ -1239,7 +1339,7 @@ async function saveResource(event, id) {
 
     toast(
       id == null
-        ? 'Resource and PDF uploaded successfully.'
+        ? (respondingTo ? '자료를 업로드하고 요청을 해결했습니다.' : 'Resource and PDF uploaded successfully.')
         : 'Changes saved.'
     );
 
