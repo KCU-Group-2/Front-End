@@ -612,14 +612,26 @@ function resourcePage(id) {
             <small>해당 자료를 기반으로 답변합니다.</small>
           </div>
 
-          <button
-            type="button"
-            id="chatbot-close"
-            class="chatbot-close"
-            aria-label="Close chatbot"
-          >
-            ✕
-          </button> 
+          <div class="chatbot-actions">
+            <button
+              type="button"
+              id="chatbot-reset"
+              class="chatbot-close chatbot-reset"
+              aria-label="대화 초기화"
+              title="대화 초기화"
+            >
+              ↻
+            </button>
+
+            <button
+              type="button"
+              id="chatbot-close"
+              class="chatbot-close"
+              aria-label="Close chatbot"
+            >
+              ✕
+            </button>
+          </div>
         </div> 
         
         <div id="chat-messages" class="chat-messages">
@@ -629,14 +641,15 @@ function resourcePage(id) {
         </div>
 
         <form id="chat-form" class="chat-form">
-          <input
-            type="text"
+          <textarea
             id="chat-input"
             name="question"
+            rows="1"
+            maxlength="1000"
             placeholder="무엇이 궁금한가요?"
             autocomplete="off"
             required
-          >
+          ></textarea>
 
           <button
             class="chat-send"
@@ -646,6 +659,8 @@ function resourcePage(id) {
             ↑
           </button>
         </form>
+
+        <p class="chat-disclaimer">AI 답변은 부정확할 수 있어요 · Enter 전송 / Shift+Enter 줄바꿈</p>
 
       </section>
 
@@ -978,184 +993,270 @@ async function render() {
       };
     }
 
-    if ($('#chatbot-toggle')) {
-      const chatbotToggle = $('#chatbot-toggle');
-      const chatbotWindow = $('#chatbot-window');
-      const chatbotClose = $('#chatbot-close');
-      const chatbotResize = $('#chatbot-resize');
-
-      chatbotToggle.onclick = () => {
-        chatbotWindow.hidden = false;
-        chatbotToggle.style.display = 'none';
-      };
-
-      chatbotClose.onclick = () => {
-        chatbotWindow.hidden = true;
-        chatbotToggle.style.display = 'flex';
-      };
-
-      if (chatbotResize) {
-        chatbotResize.onmousedown = e => {
-          e.preventDefault();
-
-          const startX = e.clientX;
-          const startY = e.clientY;
-
-          const startWidth = chatbotWindow.offsetWidth;
-          const startHeight = chatbotWindow.offsetHeight;
-
-          const startRight = parseFloat(
-            getComputedStyle(chatbotWindow).right
-          );
-
-          const startBottom = parseFloat(
-            getComputedStyle(chatbotWindow).bottom
-          );
-
-          function resizeChatbot(event) {
-            const deltaX = startX - event.clientX;
-            const deltaY = startY - event.clientY;
-
-            const newWidth = Math.min(
-              700,
-              Math.max(
-                320,
-                startWidth + deltaX
-              )
-            );
-
-            const newHeight = Math.min(
-              800,
-              Math.max(
-                420,
-                startHeight + deltaY
-              )
-            );
-
-            chatbotWindow.style.width =
-              newWidth + 'px';
-
-            chatbotWindow.style.height =
-              newHeight + 'px';
-
-            chatbotWindow.style.right =
-              startRight + 'px';
-
-            chatbotWindow.style.bottom =
-              startBottom + 'px';
-          }
-
-          function stopResize() {
-            document.removeEventListener(
-              'mousemove',
-              resizeChatbot
-            );
-
-            document.removeEventListener(
-              'mouseup',
-              stopResize
-            );
-          }
-
-          document.addEventListener(
-            'mousemove',
-            resizeChatbot
-          );
-
-          document.addEventListener(
-            'mouseup',
-            stopResize
-          );
-        };
-      }
-
-    }
-    const chatForm = $('#chat-form');
-    const chatInput = $('#chat-input');
-    const chatMessages = $('#chat-messages');
-
-   function formatChatbotAnswer(text) {
-    return String(text)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\n/g, '<br>');
-  }
-
-    if (chatForm && chatInput && chatMessages) {
-      chatForm.onsubmit = async e => {
-        e.preventDefault();
-
-        const question = chatInput.value.trim();
-        if (!question) return;
-
-        // 사용자 메시지
-        const userMessage = document.createElement('div');
-        userMessage.className = 'chat-message user-message';
-        userMessage.textContent = question;
-
-        chatMessages.appendChild(userMessage);
-
-        chatInput.value = '';
-
-        // 답변 대기 메시지
-        const botMessage = document.createElement('div');
-        botMessage.className = 'chat-message bot-message';
-        botMessage.innerHTML = '답변을 준비하고 있습니다...';
-        botMessage.classList.add('loading-message');
-
-        chatMessages.appendChild(botMessage);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-
-        // 질문 중에는 입력창/버튼 잠시 비활성화
-        const sendButton = chatForm.querySelector('.chat-send');
-
-        chatInput.disabled = true;
-
-        if (sendButton) {
-          sendButton.disabled = true;
-        }
-
-        try {
-          const result = await api(
-            '/resources/' + route(id) + '/ask',
-            jsonRequest('POST', {
-              question: question
-            })
-          );
-
-          botMessage.classList.remove('loading-message');
-
-          botMessage.innerHTML =
-            formatChatbotAnswer(
-              result.answer || '답변을 불러오지 못했습니다.'
-            );
-        } catch (error) {
-          botMessage.classList.remove('loading-message');
-          botMessage.textContent =
-            '답변을 불러오는 중 오류가 발생했습니다.';
-
-          console.error(error);
-
-        } finally {
-          chatInput.disabled = false;
-          if (sendButton) {
-            sendButton.disabled = false;
-          }
-
-          chatInput.focus();
-
-          chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-      };
-    }
+    initChatbot(id);
   } catch (error) {
     if (version !== renderVersion) return;
     $('#app').innerHTML = header(page) + `<main class="main narrow"><p class="error" role="alert">${esc(error.message)}</p><button class="btn" id="retry-button">Retry</button></main>`;
     $('#account-button').onclick = account; $('#retry-button').onclick = render;
   }
 }
+// ===== PDF Chatbot =====
+const CHAT_SUGGESTIONS = [
+  '이 자료를 한눈에 요약해줘',
+  '핵심 개념을 정리해줘',
+  '예상 시험 문제 3개 만들어줘',
+  '중요한 용어와 공식을 알려줘'
+];
+const CHAT_OPEN_KEY = 'studyswap-chat-open';
+const CHAT_MAX_SAVED = 40;
+const CHAT_TIMEOUT_MS = 60000;
+const chatKey = id => 'studyswap-chat-' + id;
+
+function loadChat(id) {
+  try {
+    const list = JSON.parse(sessionStorage.getItem(chatKey(id)) || '[]');
+    return Array.isArray(list) ? list.filter(m => m && typeof m.text === 'string') : [];
+  } catch { return []; }
+}
+function saveChat(id, list) {
+  try { sessionStorage.setItem(chatKey(id), JSON.stringify(list.slice(-CHAT_MAX_SAVED))); } catch {}
+}
+
+// Small, safe markdown renderer: code blocks, inline code, bold, italic, headings, lists.
+// All text is HTML-escaped first, so model output can never inject markup.
+function formatChatbotAnswer(text) {
+  const blocks = [];
+  let s = String(text ?? '').replace(/\r\n/g, '\n');
+  s = s.replace(/```[\w-]*\n?([\s\S]*?)```/g, (_, code) => {
+    blocks.push(code.replace(/\n$/, ''));
+    return `\u0000${blocks.length - 1}\u0000`;
+  });
+  s = esc(s);
+  const inline = t => t
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*(?!\s)([^*\n]+?)\*(?!\*)/g, '$1<em>$2</em>');
+
+  const out = [];
+  let list = null;
+  const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+  const openList = tag => { if (list !== tag) { closeList(); out.push(`<${tag}>`); list = tag; } };
+
+  for (const line of s.split('\n')) {
+    let m;
+    if (/^\u0000\d+\u0000$/.test(line.trim())) { closeList(); out.push(line.trim()); }
+    else if ((m = line.match(/^\s*[-*•]\s+(.*)/))) { openList('ul'); out.push(`<li>${inline(m[1])}</li>`); }
+    else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { openList('ol'); out.push(`<li>${inline(m[1])}</li>`); }
+    else if ((m = line.match(/^#{1,4}\s+(.*)/))) { closeList(); out.push(`<h4>${inline(m[1])}</h4>`); }
+    else if (!line.trim()) { closeList(); }
+    else { closeList(); out.push(`<p>${inline(line)}</p>`); }
+  }
+  closeList();
+  return out.join('').replace(/\u0000(\d+)\u0000/g, (_, i) => `<pre><code>${esc(blocks[Number(i)])}</code></pre>`);
+}
+
+function initChatbot(id) {
+  const toggle = $('#chatbot-toggle'), win = $('#chatbot-window');
+  const closeBtn = $('#chatbot-close'), resetBtn = $('#chatbot-reset'), handle = $('#chatbot-resize');
+  const form = $('#chat-form'), input = $('#chat-input'), box = $('#chat-messages');
+  if (!toggle || !win || !form || !input || !box) return;
+  const sendBtn = form.querySelector('.chat-send');
+
+  let history = loadChat(id);
+  let pending = false, controller = null, cancelled = false;
+
+  const scrollDown = () => { box.scrollTop = box.scrollHeight; };
+  const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+  const growInput = () => {
+    input.style.height = 'auto';
+    input.style.height = clamp(input.scrollHeight, 46, 120) + 'px';
+  };
+  const setBusy = busyNow => {
+    input.disabled = busyNow;
+    if (sendBtn) sendBtn.disabled = busyNow;
+    if (resetBtn) resetBtn.disabled = false;
+  };
+  const setOpen = open => {
+    win.hidden = !open;
+    toggle.style.display = open ? 'none' : 'flex';
+    try { sessionStorage.setItem(CHAT_OPEN_KEY, open ? '1' : ''); } catch {}
+    if (open) { scrollDown(); if (!pending) input.focus(); }
+  };
+
+  // ----- message builders -----
+  function addCopyButton(el, text) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'chat-copy';
+    btn.textContent = '복사';
+    btn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = '복사됨 ✓';
+      } catch { btn.textContent = '복사 실패'; }
+      setTimeout(() => { btn.textContent = '복사'; }, 1500);
+    };
+    el.appendChild(btn);
+  }
+  function addBubble(role, text) {
+    const el = document.createElement('div');
+    if (role === 'user') {
+      el.className = 'chat-message user-message';
+      el.textContent = text;
+    } else {
+      el.className = 'chat-message bot-message rich';
+      el.innerHTML = formatChatbotAnswer(text);
+      addCopyButton(el, text);
+    }
+    box.appendChild(el);
+    return el;
+  }
+  function addTyping() {
+    const el = document.createElement('div');
+    el.className = 'chat-message bot-message loading-message typing';
+    el.setAttribute('aria-label', '답변을 준비하고 있습니다');
+    el.innerHTML = '<span class="typing-dots"><i></i><i></i><i></i></span><span class="typing-text">PDF를 읽고 답변을 준비하고 있어요</span>';
+    box.appendChild(el);
+    return el;
+  }
+  function addError(question, message) {
+    const el = document.createElement('div');
+    el.className = 'chat-message bot-message chat-error-message';
+    const p = document.createElement('p');
+    p.textContent = message;
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'chat-retry';
+    retry.textContent = '다시 시도';
+    retry.onclick = () => { el.remove(); ask(question, true); };
+    el.append(p, retry);
+    box.appendChild(el);
+    return el;
+  }
+  function showSuggestions() {
+    if (box.querySelector('.chat-suggestions')) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-suggestions';
+    CHAT_SUGGESTIONS.forEach(q => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chat-suggestion';
+      b.textContent = q;
+      b.onclick = () => ask(q);
+      wrap.appendChild(b);
+    });
+    box.appendChild(wrap);
+  }
+
+  // ----- conversation flow -----
+  async function ask(rawQuestion, isRetry = false) {
+    const question = String(rawQuestion || '').trim();
+    if (!question || pending) return;
+    pending = true; cancelled = false;
+    setBusy(true);
+    box.querySelector('.chat-suggestions')?.remove();
+
+    if (!isRetry) {
+      history.push({role: 'user', text: question});
+      saveChat(id, history);
+      addBubble('user', question);
+    }
+    const typing = addTyping();
+    scrollDown();
+
+    controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
+    try {
+      const result = await api('/resources/' + route(id) + '/ask', {
+        ...jsonRequest('POST', {question}),
+        signal: controller.signal
+      });
+      const answer = String(result.answer || '').trim() || '답변을 불러오지 못했습니다.';
+      history.push({role: 'bot', text: answer});
+      saveChat(id, history);
+      if (cancelled || !box.isConnected) return;
+      typing.remove();
+      addBubble('bot', answer);
+    } catch (error) {
+      if (cancelled || !box.isConnected) return;
+      typing.remove();
+      const timedOut = error.name === 'AbortError';
+      addError(question, timedOut
+        ? '응답 시간이 너무 오래 걸리고 있어요. 잠시 후 다시 시도해주세요.'
+        : (error.message || '답변을 불러오는 중 오류가 발생했습니다.'));
+      console.error(error);
+    } finally {
+      clearTimeout(timer);
+      controller = null;
+      if (!cancelled && box.isConnected) {
+        pending = false;
+        setBusy(false);
+        input.focus();
+        scrollDown();
+      }
+    }
+  }
+
+  function resetChat() {
+    if (!history.length && !pending) return;
+    if (!window.confirm('대화 내용을 모두 지울까요?')) return;
+    cancelled = true;
+    controller?.abort();
+    pending = false;
+    history = [];
+    saveChat(id, history);
+    box.querySelectorAll('.chat-message:not(.intro-message), .chat-suggestions').forEach(n => n.remove());
+    setBusy(false);
+    showSuggestions();
+    input.focus();
+  }
+
+  // ----- restore previous conversation -----
+  history.forEach(m => addBubble(m.role === 'user' ? 'user' : 'bot', m.text));
+  if (!history.length) showSuggestions();
+
+  // ----- events -----
+  toggle.onclick = () => setOpen(true);
+  closeBtn.onclick = () => setOpen(false);
+  if (resetBtn) resetBtn.onclick = resetChat;
+  win.onkeydown = e => { if (e.key === 'Escape') setOpen(false); };
+
+  form.onsubmit = e => {
+    e.preventDefault();
+    const q = input.value;
+    if (!q.trim() || pending) return;
+    input.value = '';
+    growInput();
+    ask(q);
+  };
+  // Enter sends, Shift+Enter inserts a newline. isComposing keeps Korean IME input safe.
+  input.onkeydown = e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  };
+  input.oninput = growInput;
+
+  if (handle) {
+    handle.onpointerdown = e => {
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      const sx = e.clientX, sy = e.clientY, sw = win.offsetWidth, sh = win.offsetHeight;
+      handle.onpointermove = ev => {
+        win.style.width = clamp(sw + sx - ev.clientX, 320, 700) + 'px';
+        win.style.height = clamp(sh + sy - ev.clientY, 420, 800) + 'px';
+      };
+      handle.onpointerup = () => { handle.onpointermove = null; handle.onpointerup = null; };
+    };
+  }
+
+  // Keep the window open across pages / refreshes within the session.
+  let wasOpen = false;
+  try { wasOpen = sessionStorage.getItem(CHAT_OPEN_KEY) === '1'; } catch {}
+  if (wasOpen) setOpen(true);
+}
+
 async function saveResource(event, id) {
 
   event.preventDefault();
