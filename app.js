@@ -3,6 +3,15 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 let user = null, courses = [], resources = [];
 let requestRows = [], requestLoadError = '', uploadRequest = null;
 let courseQuery = '', resourceQuery = '', busy = false;
+let points = null, libraryItems = [];
+const uploadedOn = r => {
+  const d = new Date(r?.created_at);
+  return Number.isNaN(d.getTime()) ? '' : `업로드 ${d.toLocaleDateString('ko-KR', {year: 'numeric', month: 'long', day: 'numeric'})}`;
+};
+const pointLabel = () => points == null ? '' : ` · ${points}P`;
+async function refreshPoints() {
+  try { points = (await api('/me/points')).points ?? null; } catch { points = null; }
+}
 // Shared data helpers used by multiple pages.
 const courseBy = id => courses.find(c => String(c.id) === String(id));
 const resourceBy = id => resources.find(r => String(r.id) === String(id));
@@ -69,10 +78,13 @@ function header(page) {
         <a href="#home" class="${page === 'home' ? 'active' : ''}">Home</a>
         <a href="#courses" class="${coursesActive ? 'active' : ''}">Courses</a>
         <a href="#upload" class="${page === 'upload' ? 'active' : ''}">Upload</a>
+        <a href="#requests" class="${page === 'requests' ? 'active' : ''}">자료 요청 게시판</a>
+        <a href="#library" class="${page === 'library' ? 'active' : ''}">My Library</a>
+        <a href="#help" class="${page === 'help' ? 'active' : ''}">Help</a>
       </nav>
 
       <div class="account">
-        <button class="btn" id="account-button">${esc(user.name)}</button>
+        <button class="btn" id="account-button">${esc(user.name + pointLabel())}</button>
       </div>
     </header>
   `;
@@ -192,32 +204,9 @@ function home() {
             StudySwap은 UW–Madison 학생들이 수업 노트, 스터디 가이드,
             기출자료 등 학습 자료를 찾고 공유할 수 있는 플랫폼입니다.
           </p>
-
-          <div class="home-actions">
-            <a class="btn dark home-primary" href="#courses">
-              강의 찾기
-            </a>
-
-            <a class="btn home-secondary" href="#upload">
-              자료 업로드
-            </a>
-          </div>
         </div>
 
-        <div class="home-hero-art">
-          <div class="book-stack">
-            <div class="book">NOTES</div>
-            <div class="book">STUDY GUIDES</div>
-            <div class="book">OLD EXAMS</div>
-          </div>
-
-          <div class="study-icon">
-            <img src="pngegg.png" alt="Bucky Badger">
-          </div>
-        </div>
-      </section>
-
-      <section class="home-feature-grid">
+        <div class="home-feature-grid">
 
         <a href="#courses" class="home-feature-card">
           <div class="feature-icon">⌕</div>
@@ -243,7 +232,7 @@ function home() {
 
         </a>
 
-        <div class="home-feature-card">
+        <a href="#requests" class="home-feature-card">
           <div class="feature-icon">♡</div>
 
           <div>
@@ -252,8 +241,9 @@ function home() {
               유용한 자료를 공유하고 필요한 자료를 찾아 더 효율적으로 공부해보세요.
             </p>
           </div>
-        </div>
+        </a>
 
+        </div>
       </section>
 
       <section class="home-bottom-grid">
@@ -274,7 +264,7 @@ function home() {
                   >
                     <div>
                       <strong>${esc(r.title)}</strong>
-                      <p>${esc(r.course || '')}</p>
+                      <p>${esc(r.course || '')}${uploadedOn(r) ? ' · ' + esc(uploadedOn(r)) : ''}</p>
                     </div>
 
                     <span class="tag">
@@ -443,7 +433,34 @@ async function showCourses() {
 
 // Reusable resource row used on a Course Detail page.
 function resourceRow(r) {
-  return `<a class="resource" href="#resource/${route(r.id)}"><div class="grow"><h3>${esc(r.title)}</h3><small>${esc(r.resource_type)}</small></div><span>View →</span></a>`;
+  const lock = r.locked ? `<span class="tag">🔒 ${esc(r.unlock_cost ?? 10)}P</span>` : '';
+  return `<a class="resource" href="#resource/${route(r.id)}"><div class="grow"><h3>${esc(r.title)}</h3><small>${esc(r.resource_type)}</small></div><span class="resource-date">${esc(uploadedOn(r))}</span>${lock}<span>View →</span></a>`;
+}
+
+// My Library page: resources bought with points.
+function libraryPage() {
+  const rows = libraryItems.map(r => `<a class="resource" href="#resource/${route(r.id)}"><div class="grow"><h3>${esc(r.title)}</h3><small>${esc(code(courseBy(r.course_id)) || r.course || '')} · ${esc(r.resource_type)}</small></div><span class="resource-date">${esc(uploadedOn(r))}</span><span>View →</span></a>`).join('');
+  return `<main class="main narrow"><div class="page-heading"><h1>My Library</h1><p>포인트로 구매한 자료 ${libraryItems.length}개</p></div><div class="panel list">${rows || '<div class="empty">아직 구매한 자료가 없습니다. 코스에서 자료를 잠금 해제해보세요.</div>'}</div></main>`;
+}
+
+// Global request board: requests from every course, with a course picker for new requests.
+function requestsPage() {
+  const options = courses.map(c => `<option value="${esc(c.id)}">${esc(code(c))} — ${esc(c.title)}</option>`).join('');
+  return `<main class="main narrow"><div class="page-heading"><h1>자료 요청 게시판</h1><p>필요한 자료를 요청하거나, 다른 학생의 요청에 자료를 올려주세요. (요청 해결 시 +10P)</p></div>
+    <form id="request-form" class="panel">
+      <label class="field">강의<select name="course_id" required>${options}</select></label>
+      <label class="field">요청 내용<textarea name="content" required rows="3" placeholder="Midterm 2 practice problems 있으신 분 올려주세요."></textarea></label>
+      <p id="request-error" class="error" role="alert"></p>
+      <button class="btn dark" type="submit">요청 등록</button>
+    </form>
+    <div class="request-toolbar"><label>상태 <select id="request-filter"><option value="all">전체</option><option value="open">요청 중</option><option value="fulfilled">해결됨</option></select></label></div>
+    <div id="request-results" aria-live="polite"></div></main>`;
+}
+async function loadAllRequests() {
+  const lists = await Promise.all(courses.map(c =>
+    api('/courses/' + route(c.id) + '/requests').then(r => listData(r, 'requests')).catch(() => [])));
+  requestRows = lists.flat().sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  requestLoadError = '';
 }
 // Course Detail page: resources, filters, and upload link.
 function coursePage(id) {
@@ -485,7 +502,7 @@ function showRequests() {
     const done = r.status === 'fulfilled';
     const date = new Date(r.created_at);
     return `<article class="panel request-card">
-      <div class="row between wrap"><span class="tag ${done ? 'green' : 'amber'}">${done ? '해결됨' : '요청 중'}</span><small>${esc(r.requester || 'Anonymous')}${Number.isNaN(date.getTime()) ? '' : ' · ' + esc(date.toLocaleDateString())}</small></div>
+      <div class="row between wrap"><span class="tag ${done ? 'green' : 'amber'}">${done ? '해결됨' : '요청 중'}</span><small>${esc(code(courseBy(r.course_id)))} · ${esc(r.requester || 'Anonymous')}${Number.isNaN(date.getTime()) ? '' : ' · ' + esc(date.toLocaleDateString())}</small></div>
       <p class="request-content">${esc(r.content)}</p>
       ${done ? (r.fulfilled_resource_id != null ? `<a class="btn" href="#resource/${route(r.fulfilled_resource_id)}">업로드된 자료 보기</a>` : '<small>연결된 자료가 없습니다.</small>') : `<a class="btn dark" href="#upload/${route(r.course_id)}/${route(r.id)}">자료 올리기</a>`}
     </article>`;
@@ -498,19 +515,62 @@ function bindRequests(courseId) {
     e.preventDefault();
     const form = e.currentTarget, button = form.querySelector('button');
     if (button.disabled) return;
-    const content = String(new FormData(form).get('content') || '').trim();
+    const data = new FormData(form);
+    const targetCourse = courseId ?? data.get('course_id');
+    const content = String(data.get('content') || '').trim();
     if (!content) { showError('#request-error', new Error('요청 내용을 입력해주세요.')); return; }
     button.disabled = true;
     $('#request-error').textContent = '';
     try {
-      await api('/courses/' + route(courseId) + '/requests', jsonRequest('POST', {content}));
-      form.reset();
-      await loadRequests(courseId);
+      await api('/courses/' + route(targetCourse) + '/requests', jsonRequest('POST', {content}));
+      form.querySelector('textarea').value = '';
+      if (courseId == null) await loadAllRequests(); else await loadRequests(courseId);
       if ($('#request-form') === form) showRequests();
       toast('자료 요청이 등록되었습니다.');
     } catch (error) { if ($('#request-form') === form) showError('#request-error', error); }
     finally { button.disabled = false; }
   };
+}
+
+// Help page: report a resource or request a point refund. Needs POST /reports and POST /refund-requests on the backend.
+const REPORT_REASONS = ['부적절한 내용', '저작권 침해', '잘못된 강의/정보', '파일 손상', '스팸/중복', '기타'];
+const REFUND_REASONS = ['PDF가 열리지 않음/손상됨', '설명과 다른 자료', '잘못된 강의에 업로드됨', '중복 자료', '기타'];
+function helpPage(id) {
+  const options = (list, sel) => list.map(r => `<option value="${esc(r.id)}" ${String(r.id) === String(sel) ? 'selected' : ''}>${esc(r.title)} (${esc(code(courseBy(r.course_id)))})</option>`).join('');
+  const reasons = list => list.map(x => `<option>${esc(x)}</option>`).join('');
+  const form = (formId, title, intro, picker, reasonList, button) => `<section class="panel section"><h2>${title}</h2><p class="muted">${intro}</p>
+    <form id="${formId}"><label class="field">자료<select name="resource_id" required>${picker}</select></label>
+    <label class="field">사유<select name="reason" required>${reasons(reasonList)}</select></label>
+    <label class="field">상세 내용<textarea name="details" rows="3" required placeholder="자세한 상황을 적어주세요."></textarea></label>
+    <p id="${formId}-error" class="error" role="alert"></p><button class="btn dark" type="submit">${button}</button></form></section>`;
+  return `<main class="main narrow"><div class="page-heading"><h1>Help</h1><p class="muted">문제가 있는 자료를 신고하거나 포인트 환불을 요청할 수 있습니다.</p></div>
+    <section class="panel"><h2>환불 안내</h2><ul>
+      <li>잠금 해제한 자료에 문제가 있을 때 환불을 요청할 수 있습니다.</li>
+      <li>잠금 해제 후 7일 이내, 자료당 1회만 요청할 수 있습니다.</li>
+      <li>승인되면 사용한 포인트가 환불됩니다.</li></ul>
+      <p class="muted">정책은 운영팀 검토 후 변경될 수 있습니다.</p></section>
+    ${form('refund-form', '환불 요청', '내 라이브러리의 구매한 자료만 선택할 수 있습니다.', options(libraryItems, id) || '<option value="" disabled selected>구매한 자료가 없습니다</option>', REFUND_REASONS, '환불 요청하기')}
+    ${form('report-form', '자료 신고', '운영팀이 검토 후 조치합니다.', options(resources, id), REPORT_REASONS, '신고하기')}
+  </main>`;
+}
+function bindHelp() {
+  for (const [formId, path, done] of [['refund-form', '/refund-requests', '환불 요청이 접수되었습니다.'], ['report-form', '/reports', '신고가 접수되었습니다.']]) {
+    $('#' + formId).onsubmit = async e => {
+      e.preventDefault();
+      const form = e.currentTarget, button = form.querySelector('button');
+      if (button.disabled) return;
+      const data = Object.fromEntries(new FormData(form));
+      data.resource_id = Number(data.resource_id);
+      button.disabled = true; $('#' + formId + '-error').textContent = '';
+      try {
+        await api(path, jsonRequest('POST', data));
+        form.querySelector('textarea').value = '';
+        toast(done);
+      } catch (error) {
+        showError('#' + formId + '-error', ['Not Found', 'Method Not Allowed'].includes(error.message) ? new Error('이 기능은 아직 서버에서 지원되지 않습니다.') : error);
+      } finally { button.disabled = false; }
+    };
+  }
 }
 
 // Course Detail page: filters the fetched course resources by title.
@@ -544,13 +604,18 @@ function resourcePage(id) {
         <p>${esc(r.description || '')}</p>
 
         <p class="muted">
-          Uploaded by Anonymous
+          Uploaded by Anonymous${uploadedOn(r) ? ' · ' + esc(uploadedOn(r)) : ''}
         </p>
 
         <div class="row">
 
           ${
-            r.has_pdf
+            r.has_pdf && r.locked
+              ? `
+                <button class="btn" id="preview-pdf-button" type="button">Preview (2 pages)</button>
+                <button class="btn dark" id="unlock-button" type="button">🔒 Unlock for ${esc(r.unlock_cost ?? 10)}P</button>
+              `
+              : r.has_pdf
               ? `
                 <button
                   class="btn"
@@ -562,6 +627,13 @@ function resourcePage(id) {
               `
               : ''
           }
+
+          <a
+            class="btn"
+            href="#help/${route(r.id)}"
+          >
+            Report / Refund
+          </a>
 
           <a
             class="btn"
@@ -763,9 +835,21 @@ function notFound() { return '<main class="main narrow"><div class="panel empty"
 // Assistant page placeholder.
 function assistant() { return '<main class="main narrow"><section class="panel"><h1>Assistant</h1><p>The AI assistant is not connected yet.</p></section></main>'; }
 // Account dialog and logout handler.
-function account() {
-  $('#dialog-body').innerHTML = `<h2>${esc(user.name)}</h2><p>${esc(user.email)}</p><button class="btn" id="logout-button">Log out</button>`;
+const POINT_REASONS = {signup_bonus: '가입 보너스', resource_upload: '자료 업로드', request_fulfilled: '자료 요청 충족', resource_unlock: '자료 잠금 해제'};
+async function account() {
+  $('#dialog-body').innerHTML = `<h2>${esc(user.name)}</h2><p>${esc(user.email)}</p>
+    <p class="points-gold">Points: ${points === null ? '-' : esc(points)}P</p>
+    <h3>포인트 내역</h3><ul class="point-log" id="point-log"><li class="muted">불러오는 중...</li></ul>
+    <button class="btn" id="logout-button">Log out</button>`;
   $('#dialog').showModal();
+  api('/me/point-transactions').then(data => {
+    const rows = listData(data, 'transactions');
+    $('#point-log').innerHTML = rows.map(t => {
+      const gain = t.amount >= 0, item = t.resource_id ? resourceBy(t.resource_id) : null;
+      const when = t.created_at ? new Date(t.created_at).toLocaleDateString('ko-KR') : '';
+      return `<li><span>${esc(POINT_REASONS[t.transaction_type] || t.transaction_type)}${item ? ' · ' + esc(item.title) : ''}<small>${esc(when)}</small></span><b class="${gain ? 'gain' : 'spend'}">${gain ? '+' : ''}${esc(t.amount)}P</b></li>`;
+    }).join('') || '<li class="muted">내역이 없습니다.</li>';
+  }).catch(() => { const log = $('#point-log'); if (log) log.innerHTML = '<li class="muted">내역을 불러올 수 없습니다.</li>'; });
   $('#logout-button').onclick = () => {
     sessionStorage.removeItem('studyswap-access-token'); sessionStorage.removeItem('studyswap-user');
     user = null; courses = []; resources = []; $('#dialog').close(); go('login');
@@ -824,6 +908,21 @@ async function render() {
     resources = listData(await api('/resources'), 'resources');
   }
 
+  await refreshPoints();
+  if (page === 'library') {
+    libraryItems = listData((await api('/me/library')).unlocked, 'unlocked');
+    courses = listData(await api('/courses'), 'courses');
+  }
+  if (page === 'requests') {
+    courses = listData(await api('/courses'), 'courses');
+    await loadAllRequests();
+  }
+  if (page === 'help') {
+    courses = listData(await api('/courses'), 'courses');
+    resources = listData(await api('/resources'), 'resources');
+    libraryItems = listData((await api('/me/library')).unlocked, 'unlocked');
+  }
+
   uploadRequest = null;
   if (page === 'course') {
     await refreshResources(id);
@@ -851,7 +950,7 @@ async function render() {
   if (version !== renderVersion) return;
 
 
-    const pages = {home, courses: coursesPage, course: () => coursePage(id), resource: () => resourcePage(id), upload: () => uploadPage(id), edit: () => editPage(id)};
+    const pages = {home, courses: coursesPage, course: () => coursePage(id), resource: () => resourcePage(id), upload: () => uploadPage(id), edit: () => editPage(id), library: libraryPage, requests: requestsPage, help: () => helpPage(id)};
     $('#app').innerHTML = header(page) + (pages[page] || notFound)();
     $('#account-button').onclick = account;
 
@@ -928,6 +1027,8 @@ async function render() {
   }
 
     
+    if (page === 'requests') bindRequests(null);
+    if (page === 'help') bindHelp();
     if (page === 'course' && courseBy(id)) {
       showResources(id);
       bindRequests(id);
@@ -948,6 +1049,29 @@ async function render() {
 
     const openPdfButton = $('#open-pdf-button');
 
+    if ($('#unlock-button')) $('#unlock-button').onclick = async e => {
+      const r = resourceBy(id);
+      if (busy || !window.confirm(`${r.unlock_cost ?? 10}P를 사용해 이 자료를 잠금 해제할까요?`)) return;
+      busy = true; const button = e.currentTarget; button.disabled = true;
+      try {
+        await api('/resources/' + route(id) + '/unlock', {method: 'POST'});
+        toast('자료가 잠금 해제되었습니다.');
+        busy = false;
+        await render();
+      } catch (error) { showError('#resource-error', error); }
+      finally { busy = false; button.disabled = false; }
+    };
+
+    if ($('#preview-pdf-button')) $('#preview-pdf-button').onclick = async () => {
+      const newTab = window.open('about:blank', '_blank');
+      try {
+        const token = sessionStorage.getItem('studyswap-access-token');
+        const response = await fetch(`${CONFIG.apiBase}/resources/${route(id)}/preview`, {headers: token ? {Authorization: `Bearer ${token}`} : {}});
+        if (!response.ok) throw new Error('Unable to load the preview.');
+        const url = URL.createObjectURL(await response.blob());
+        if (newTab) newTab.location.href = url; else window.location.href = url;
+      } catch (error) { if (newTab) newTab.close(); showError('#resource-error', error); }
+    };
     if (openPdfButton) {
 
       openPdfButton.onclick = async () => {
@@ -1440,7 +1564,7 @@ async function saveResource(event, id) {
 
     toast(
       id == null
-        ? (respondingTo ? '자료를 업로드하고 요청을 해결했습니다.' : 'Resource and PDF uploaded successfully.')
+        ? (respondingTo ? '자료를 업로드하고 요청을 해결했습니다. (+30P)' : 'Resource and PDF uploaded successfully. (+20P)')
         : 'Changes saved.'
     );
 

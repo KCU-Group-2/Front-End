@@ -1167,3 +1167,18 @@ select {
 .typing-dots i:nth-child(3){animation-delay:.3s}
 @keyframes chat-bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-5px);opacity:1}}
 @media (prefers-reduced-motion:reduce){.typing-dots i{animation:none}}
+
+/* Home hero: Bucky Badger background (50% opacity), text on top, action cards in one row */
+.home-hero{display:block;position:relative;overflow:hidden;text-align:center;background:#fff;isolation:isolate}
+.home-hero::before{content:"";position:absolute;inset:0;z-index:-1;background:url("pngegg.png") center/contain no-repeat;opacity:.5}
+.home-hero .home-intro{margin-left:auto;margin-right:auto}
+.home-hero .home-feature-grid{margin:36px 0 0;text-align:left}
+.home-hero .home-feature-card{background:rgba(255,255,255,.92)}
+.resource-date{font-size:13px;color:#7a8190;white-space:nowrap}
+
+/* Account dialog: gold points and history */
+.points-gold{color:#d4a017;font-size:22px;font-weight:800;margin:8px 0}
+.point-log{list-style:none;margin:8px 0 16px;padding:0;max-height:260px;overflow-y:auto;min-width:300px}
+.point-log li{display:flex;justify-content:space-between;gap:16px;padding:8px 0;border-bottom:1px solid #eee}
+.point-log small{display:block;color:#7a8190;font-size:12px}
+.point-log .gain{color:#1a7f37}.point-log .spend{color:#c90010}
