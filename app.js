@@ -612,7 +612,7 @@ function resourcePage(id) {
           ${
             r.has_pdf && r.locked
               ? `
-                <button class="btn" id="preview-pdf-button" type="button">Preview (2 pages)</button>
+                <button class="btn" id="preview-pdf-button" type="button" aria-controls="pdf-preview" aria-expanded="false">Preview (2 pages)</button>
                 <button class="btn dark" id="unlock-button" type="button">🔒 Unlock for ${esc(r.unlock_cost ?? 10)}P</button>
               `
               : r.has_pdf
@@ -621,6 +621,8 @@ function resourcePage(id) {
                   class="btn"
                   id="open-pdf-button"
                   type="button"
+                  aria-controls="pdf-preview"
+                  aria-expanded="false"
                 >
                   Open PDF
                 </button>
@@ -652,6 +654,16 @@ function resourcePage(id) {
         </div>
 
         <p id="resource-error" class="error" role="alert"></p>
+        ${r.has_pdf ? `
+          <section id="pdf-preview" class="inline-pdf" aria-labelledby="pdf-preview-heading" hidden>
+            <div class="row between wrap">
+              <h2 id="pdf-preview-heading">${r.locked ? 'PDF Preview (2 pages)' : 'PDF Preview'}</h2>
+              <button type="button" id="close-pdf-preview" class="btn">Close preview</button>
+            </div>
+            <p id="pdf-preview-status" role="status"></p>
+            <div id="pdf-preview-document"></div>
+          </section>
+        ` : ''}
       </section>
 
 
@@ -858,6 +870,7 @@ async function account() {
 
 // Route version prevents an older response from replacing a newer screen.
 let renderVersion = 0;
+let disposePdfPreview = () => {};
 function showError(selector, error) {
   const node = $(selector);
   if (node) node.textContent = error.message; else toast(error.message);
@@ -866,6 +879,8 @@ function jsonRequest(method, data) {
   return {method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)};
 }
 async function render() {
+  disposePdfPreview();
+  disposePdfPreview = () => {};
   const version = ++renderVersion;
   let [page = 'home', rawId = ''] = location.hash.slice(1).split('/');
   let id; try { id = decodeURIComponent(rawId); } catch { id = ''; }
@@ -1047,8 +1062,6 @@ async function render() {
       finally {busy = false; button.disabled = false;}
     };
 
-    const openPdfButton = $('#open-pdf-button');
-
     if ($('#unlock-button')) $('#unlock-button').onclick = async e => {
       const r = resourceBy(id);
       if (busy || !window.confirm(`${r.unlock_cost ?? 10}P를 사용해 이 자료를 잠금 해제할까요?`)) return;
@@ -1062,60 +1075,8 @@ async function render() {
       finally { busy = false; button.disabled = false; }
     };
 
-    if ($('#preview-pdf-button')) $('#preview-pdf-button').onclick = async () => {
-      const newTab = window.open('about:blank', '_blank');
-      try {
-        const token = sessionStorage.getItem('studyswap-access-token');
-        const response = await fetch(`${CONFIG.apiBase}/resources/${route(id)}/preview`, {headers: token ? {Authorization: `Bearer ${token}`} : {}});
-        if (!response.ok) throw new Error('Unable to load the preview.');
-        const url = URL.createObjectURL(await response.blob());
-        if (newTab) newTab.location.href = url; else window.location.href = url;
-      } catch (error) { if (newTab) newTab.close(); showError('#resource-error', error); }
-    };
-    if (openPdfButton) {
-
-      openPdfButton.onclick = async () => {
-
-        // popup blocker를 피하려고
-        // 클릭 즉시 빈 탭을 먼저 연다.
-        const newTab = window.open(
-          'about:blank',
-          '_blank'
-        );
-
-        try {
-
-          const result = await api(
-            '/resources/' +
-            route(id) +
-            '/pdf'
-          );
-
-          if (!result.url) {
-            throw new Error(
-              'The server did not return a PDF URL.'
-            );
-          }
-
-          if (newTab) {
-            newTab.location.href = result.url;
-          } else {
-            window.location.href = result.url;
-          }
-
-        } catch (error) {
-
-          if (newTab) {
-            newTab.close();
-          }
-
-          showError(
-            '#resource-error',
-            error
-          );
-        }
-      };
-    }
+    const previewButton = $('#preview-pdf-button') || $('#open-pdf-button');
+    if (previewButton) bindPdfPreview(id, previewButton);
 
     initChatbot(id);
   } catch (error) {
@@ -1124,6 +1085,79 @@ async function render() {
     $('#account-button').onclick = account; $('#retry-button').onclick = render;
   }
 }
+function bindPdfPreview(id, button) {
+  const panel = $('#pdf-preview');
+  const status = $('#pdf-preview-status');
+  const documentSlot = $('#pdf-preview-document');
+  const locked = button.id === 'preview-pdf-button';
+  let objectUrl;
+  let attempt = 0;
+
+  function close() {
+    attempt++;
+    documentSlot.replaceChildren();
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    objectUrl = undefined;
+    panel.hidden = true;
+    button.disabled = false;
+    button.setAttribute('aria-expanded', 'false');
+  }
+
+  disposePdfPreview = close;
+  $('#close-pdf-preview').onclick = () => {
+    close();
+    button.focus();
+  };
+  button.onclick = async () => {
+    if (!panel.hidden && documentSlot.childElementCount) {
+      panel.scrollIntoView({block: 'nearest'});
+      return;
+    }
+    const currentAttempt = ++attempt;
+    panel.hidden = false;
+    button.disabled = true;
+    button.setAttribute('aria-expanded', 'true');
+    status.textContent = 'Loading PDF…';
+    panel.scrollIntoView({block: 'nearest'});
+
+    try {
+      let url;
+      if (locked) {
+        const token = sessionStorage.getItem('studyswap-access-token');
+        const response = await fetch(`${CONFIG.apiBase}/resources/${route(id)}/preview`, {
+          headers: token ? {Authorization: `Bearer ${token}`} : {}
+        });
+        if (!response.ok) throw new Error('Unable to load the preview.');
+        const blob = await response.blob();
+        if (attempt !== currentAttempt) return;
+        objectUrl = URL.createObjectURL(new Blob([blob], {type: 'application/pdf'}));
+        url = objectUrl;
+      } else {
+        const result = await api('/resources/' + route(id) + '/pdf');
+        if (attempt !== currentAttempt) return;
+        if (!result.url) throw new Error('The server did not return a PDF URL.');
+        url = new URL(result.url, CONFIG.apiBase);
+        if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Invalid PDF URL.');
+      }
+
+      const frame = document.createElement('iframe');
+      frame.title = locked ? 'Two-page PDF preview' : 'Full PDF preview';
+      frame.src = url;
+      const fallback = document.createElement('a');
+      fallback.href = url;
+      fallback.target = '_blank';
+      fallback.rel = 'noopener noreferrer';
+      fallback.textContent = 'Open PDF in a new tab';
+      documentSlot.replaceChildren(frame, fallback);
+      status.textContent = '';
+    } catch (error) {
+      if (attempt === currentAttempt) status.textContent = error.message;
+    } finally {
+      if (attempt === currentAttempt) button.disabled = false;
+    }
+  };
+}
+
 // ===== PDF Chatbot =====
 const CHAT_SUGGESTIONS = [
   '이 자료를 한눈에 요약해줘',
