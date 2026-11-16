@@ -563,7 +563,16 @@ function bindHelp() {
       data.resource_id = Number(data.resource_id);
       button.disabled = true; $('#' + formId + '-error').textContent = '';
       try {
-        await api(path, jsonRequest('POST', data));
+        const requestPath =
+          formId === 'report-form'
+            ? '/resources/' + route(data.resource_id) + '/report'
+            : path;
+        
+        if (formId === 'report-form') {
+          delete data.resource_id; }
+
+        await api(requestPath, jsonRequest('POST', data) );
+        
         form.querySelector('textarea').value = '';
         toast(done);
       } catch (error) {
