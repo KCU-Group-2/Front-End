@@ -1197,3 +1197,25 @@ select {
   background: #f4f5f7;
 }
 .inline-pdf a { text-decoration: underline; }
+
+/* Resource cards share one layout across Courses and My Library. */
+.resource.resource-card { display: block; padding: 22px 24px; }
+.resource-card-heading { display: flex; align-items: flex-start; gap: 16px; }
+.resource-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 8px; }
+.resource-title > span:last-child { overflow-wrap: anywhere; }
+.resource-title .tag { flex-shrink: 0; white-space: nowrap; font-size: 13px; }
+.resource-view { flex-shrink: 0; padding: 8px 0 8px 12px; font-weight: 600; }
+.locked-preview { position: relative; margin-top: 18px; min-height: 150px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #f1f2f5; }
+.locked-preview canvas { display: block; width: 100%; height: auto; }
+.locked-preview::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 48px; background: linear-gradient(transparent, #f1f2f5); pointer-events: none; }
+.locked-preview > p { padding: 18px; margin: 0; }
+.locked-preview > button { margin: 0 18px 24px; position: relative; z-index: 1; }
+.resource-card-actions { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.resource-card-actions .error { margin: 0; }
+#resource-results .resource-card:last-child { border-bottom: 0; }
+@media (max-width: 600px) {
+  .resource.resource-card { padding: 18px; }
+  .resource-card-heading { flex-wrap: wrap; }
+  .resource-card-heading .grow { min-width: 180px; }
+  .resource-card-actions .btn { width: 100%; }
+}

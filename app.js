@@ -3,7 +3,24 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 let user = null, courses = [], resources = [];
 let requestRows = [], requestLoadError = '', uploadRequest = null;
 let courseQuery = '', resourceQuery = '', busy = false;
-let points = null, libraryItems = [];
+let points = null, libraryItems = [], myUploads = [];
+let cardPreviewCleanup = () => {};
+let pdfLibraryPromise;
+function pdfLibrary() {
+  if (!pdfLibraryPromise) {
+    pdfLibraryPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs')
+      .then(pdf => {
+        pdf.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.mjs';
+        return pdf;
+      }).catch(error => { pdfLibraryPromise = undefined; throw error; });
+  }
+  return pdfLibraryPromise;
+}
+async function refreshLibrary() {
+  const result = await api('/me/library');
+  libraryItems = listData(result.unlocked, 'unlocked');
+  myUploads = listData(result.uploaded, 'uploaded');
+}
 const uploadedOn = r => {
   const d = new Date(r?.created_at);
   return Number.isNaN(d.getTime()) ? '' : `업로드 ${d.toLocaleDateString('ko-KR', {year: 'numeric', month: 'long', day: 'numeric'})}`;
@@ -433,20 +450,28 @@ async function showCourses() {
 
 // Reusable resource row used on a Course Detail page.
 function resourceRow(r) {
-  const lock = r.locked ? `<span class="tag">🔒 ${esc(r.unlock_cost ?? 10)}P</span>` : '';
-  return `<a class="resource" href="#resource/${route(r.id)}"><div class="grow"><h3>${esc(r.title)}</h3><small>${esc(r.resource_type)}</small></div><span class="resource-date">${esc(uploadedOn(r))}</span>${lock}<span>View →</span></a>`;
+  const locked = r.locked === true;
+  return `<article class="resource resource-card">
+    <div class="resource-card-heading">
+      <div class="grow"><h3 class="resource-title"><span class="tag ${locked ? 'amber' : 'green'}">${locked ? '🔒 ' + esc(r.unlock_cost ?? 10) + 'P' : 'Unlocked'}</span><span>${esc(r.title)}</span></h3>
+      <small>${esc(r.resource_type)} · ${esc(uploadedOn(r))}</small></div>
+      ${locked ? '' : `<a class="resource-view" href="#resource/${route(r.id)}">View →</a>`}
+    </div>
+    ${locked && r.has_pdf ? `<div class="locked-preview" data-preview-id="${esc(r.id)}"><p role="status">Loading preview…</p></div>` : ''}
+    ${locked ? `<div class="resource-card-actions"><button class="btn dark" data-unlock-id="${esc(r.id)}" type="button">Unlock for ${esc(r.unlock_cost ?? 10)}P</button><p class="error" role="alert"></p></div>` : ''}
+  </article>`;
 }
-
-// My Library page: resources bought with points.
 function libraryPage() {
-  const rows = libraryItems.map(r => `<a class="resource" href="#resource/${route(r.id)}"><div class="grow"><h3>${esc(r.title)}</h3><small>${esc(code(courseBy(r.course_id)) || r.course || '')} · ${esc(r.resource_type)}</small></div><span class="resource-date">${esc(uploadedOn(r))}</span><span>View →</span></a>`).join('');
-  return `<main class="main narrow"><div class="page-heading"><h1>My Library</h1><p>포인트로 구매한 자료 ${libraryItems.length}개</p></div><div class="panel list">${rows || '<div class="empty">아직 구매한 자료가 없습니다. 코스에서 자료를 잠금 해제해보세요.</div>'}</div></main>`;
+  const section = (title, rows, empty) => `<section class="section"><div class="section-title"><h2>${title}</h2><small>${rows.length} resources</small></div><div class="panel list">${rows.map(r => resourceRow({...r, locked: false})).join('') || `<div class="empty">${empty}</div>`}</div></section>`;
+  return `<main class="main narrow"><div class="page-heading"><h1>My Library</h1></div>
+    ${section('My Uploads', myUploads, '아직 업로드한 자료가 없습니다.')}
+    ${section('Unlocked Resources', libraryItems, '아직 잠금 해제한 자료가 없습니다.')}</main>`;
 }
 
 // Global request board: requests from every course, with a course picker for new requests.
 function requestsPage() {
   const options = courses.map(c => `<option value="${esc(c.id)}">${esc(code(c))} — ${esc(c.title)}</option>`).join('');
-  return `<main class="main narrow"><div class="page-heading"><h1>자료 요청 게시판</h1><p>필요한 자료를 요청하거나, 다른 학생의 요청에 자료를 올려주세요. (요청 해결 시 +10P)</p></div>
+  return `<main class="main narrow"><div class="page-heading"><h1>자료 요청 게시판</h1><p>필요한 자료를 요청하거나, 다른 학생의 요청에 자료를 올려주세요.</p></div>
     <form id="request-form" class="panel">
       <label class="field">강의<select name="course_id" required>${options}</select></label>
       <label class="field">요청 내용<textarea name="content" required rows="3" placeholder="Midterm 2 practice problems 있으신 분 올려주세요."></textarea></label>
@@ -465,29 +490,9 @@ async function loadAllRequests() {
 // Course Detail page: resources, filters, and upload link.
 function coursePage(id) {
   const c = courseBy(id); if (!c) return notFound();
-  return `<main class="main narrow"><div class="breadcrumb"><a href="#courses">Courses</a> / ${esc(code(c))}</div><div class="row between page-heading"><div><h1>${esc(code(c))}</h1><p>${esc(shortDescription(c))}</p></div><a class="btn dark" href="#upload/${route(c.id)}">Upload for this course</a></div><div class="section-title"><h2>Resources</h2><select id="resource-filter" aria-label="Filter resources" style="width:auto"><option>All</option></select></div><div class="search"><input id="resource-search" aria-label="Search resources" placeholder="Search resources" value="${esc(resourceQuery)}"></div><div class="panel list" id="resource-results"></div>${requestBoard()}</main>`;
+  return `<main class="main narrow"><div class="breadcrumb"><a href="#courses">Courses</a> / ${esc(code(c))}</div><div class="row between page-heading"><div><h1>${esc(code(c))}</h1><p>${esc(shortDescription(c))}</p></div><a class="btn dark" href="#upload/${route(c.id)}">Upload for this course</a></div><div class="section-title"><h2>Resources</h2></div><div class="search"><input id="resource-search" aria-label="Search resources" placeholder="Search resources" value="${esc(resourceQuery)}"></div><div class="panel list" id="resource-results"></div></main>`;
 }
 
-// Course-specific request board. User identities remain anonymous as in the API.
-function requestBoard() {
-  return `<section class="section request-board" aria-labelledby="requests-heading">
-    <div class="section-title"><h2 id="requests-heading">자료 요청 게시판</h2></div>
-    <p>필요한 자료를 요청하거나, 다른 학생의 요청에 자료를 올려주세요.</p>
-    <form id="request-form" class="panel">
-      <label class="field">요청 내용<textarea name="content" required rows="3" placeholder="Midterm 2 practice problems 있으신 분 올려주세요."></textarea></label>
-      <p id="request-error" class="error" role="alert"></p>
-      <button class="btn dark" type="submit">요청 등록</button>
-    </form>
-    <div class="request-toolbar"><label>상태 <select id="request-filter"><option value="all">전체</option><option value="open">요청 중</option><option value="fulfilled">해결됨</option></select></label></div>
-    <div id="request-results" aria-live="polite"></div>
-  </section>`;
-}
-async function loadRequests(courseId) {
-  try {
-    requestRows = listData(await api('/courses/' + route(courseId) + '/requests'), 'requests');
-    requestLoadError = '';
-  } catch (error) { requestRows = []; requestLoadError = error.message; }
-}
 function showRequests() {
   const node = $('#request-results');
   if (!node) return;
@@ -508,7 +513,7 @@ function showRequests() {
     </article>`;
   }).join('') || '<div class="panel empty">해당하는 요청이 없습니다.</div>';
 }
-function bindRequests(courseId) {
+function bindRequests() {
   showRequests();
   $('#request-filter').onchange = showRequests;
   $('#request-form').onsubmit = async e => {
@@ -516,7 +521,7 @@ function bindRequests(courseId) {
     const form = e.currentTarget, button = form.querySelector('button');
     if (button.disabled) return;
     const data = new FormData(form);
-    const targetCourse = courseId ?? data.get('course_id');
+    const targetCourse = data.get('course_id');
     const content = String(data.get('content') || '').trim();
     if (!content) { showError('#request-error', new Error('요청 내용을 입력해주세요.')); return; }
     button.disabled = true;
@@ -524,7 +529,7 @@ function bindRequests(courseId) {
     try {
       await api('/courses/' + route(targetCourse) + '/requests', jsonRequest('POST', {content}));
       form.querySelector('textarea').value = '';
-      if (courseId == null) await loadAllRequests(); else await loadRequests(courseId);
+      await loadAllRequests();
       if ($('#request-form') === form) showRequests();
       toast('자료 요청이 등록되었습니다.');
     } catch (error) { if ($('#request-form') === form) showError('#request-error', error); }
@@ -532,60 +537,47 @@ function bindRequests(courseId) {
   };
 }
 
-// Help page: report a resource or request a point refund. Needs POST /reports and POST /refund-requests on the backend.
-const REPORT_REASONS = ['부적절한 내용', '저작권 침해', '잘못된 강의/정보', '파일 손상', '스팸/중복', '기타'];
-const REFUND_REASONS = ['PDF가 열리지 않음/손상됨', '설명과 다른 자료', '잘못된 강의에 업로드됨', '중복 자료', '기타'];
 function helpPage(id) {
-  const options = (list, sel) => list.map(r => `<option value="${esc(r.id)}" ${String(r.id) === String(sel) ? 'selected' : ''}>${esc(r.title)} (${esc(code(courseBy(r.course_id)))})</option>`).join('');
-  const reasons = list => list.map(x => `<option>${esc(x)}</option>`).join('');
-  const form = (formId, title, intro, picker, reasonList, button) => `<section class="panel section"><h2>${title}</h2><p class="muted">${intro}</p>
-    <form id="${formId}"><label class="field">자료<select name="resource_id" required>${picker}</select></label>
-    <label class="field">사유<select name="reason" required>${reasons(reasonList)}</select></label>
-    <label class="field">상세 내용<textarea name="details" rows="3" required placeholder="자세한 상황을 적어주세요."></textarea></label>
-    <p id="${formId}-error" class="error" role="alert"></p><button class="btn dark" type="submit">${button}</button></form></section>`;
-  return `<main class="main narrow"><div class="page-heading"><h1>Help</h1><p class="muted">문제가 있는 자료를 신고하거나 포인트 환불을 요청할 수 있습니다.</p></div>
-    <section class="panel"><h2>환불 안내</h2><ul>
-      <li>잠금 해제한 자료에 문제가 있을 때 환불을 요청할 수 있습니다.</li>
-      <li>잠금 해제 후 7일 이내, 자료당 1회만 요청할 수 있습니다.</li>
-      <li>승인되면 사용한 포인트가 환불됩니다.</li></ul>
-      <p class="muted">정책은 운영팀 검토 후 변경될 수 있습니다.</p></section>
-    ${form('refund-form', '환불 요청', '내 라이브러리의 구매한 자료만 선택할 수 있습니다.', options(libraryItems, id) || '<option value="" disabled selected>구매한 자료가 없습니다</option>', REFUND_REASONS, '환불 요청하기')}
-    ${form('report-form', '자료 신고', '운영팀이 검토 후 조치합니다.', options(resources, id), REPORT_REASONS, '신고하기')}
-  </main>`;
+  const options = libraryItems.map(r => `<option value="${esc(r.id)}" ${String(r.id) === String(id) ? 'selected' : ''}>${esc(r.title)}</option>`).join('');
+  return `<main class="main narrow"><div class="page-heading"><h1>Help</h1></div>
+    <section class="panel"><h2>자료 신고 및 포인트 환불</h2>
+      <p>직접 잠금 해제한 자료만 자료당 한 번 신고할 수 있습니다. 운영팀이 신고를 승인해 자료를 제거하면 해당 자료에 사용한 포인트가 자동 환불됩니다.</p>
+      ${options ? `<form id="report-form">
+        <label class="field">자료<select name="resource_id" required>${options}</select></label>
+        <label class="field">사유<input name="reason" required></label>
+        <label class="field">상세 내용 (선택)<textarea name="details" rows="3"></textarea></label>
+        <p class="error" role="alert"></p><button class="btn dark" type="submit">신고 제출</button>
+      </form>` : '<p>신고할 수 있는 잠금 해제 자료가 없습니다.</p>'}
+    </section></main>`;
 }
 function bindHelp() {
-  for (const [formId, path, done] of [['refund-form', '/refund-requests', '환불 요청이 접수되었습니다.'], ['report-form', '/reports', '신고가 접수되었습니다.']]) {
-    $('#' + formId).onsubmit = async e => {
-      e.preventDefault();
-      const form = e.currentTarget, button = form.querySelector('button');
-      if (button.disabled) return;
-      const data = Object.fromEntries(new FormData(form));
-      data.resource_id = Number(data.resource_id);
-      button.disabled = true; $('#' + formId + '-error').textContent = '';
-      try {
-        const requestPath =
-          formId === 'report-form'
-            ? '/resources/' + route(data.resource_id) + '/report'
-            : path;
-        
-        if (formId === 'report-form') {
-          delete data.resource_id; }
-
-        await api(requestPath, jsonRequest('POST', data) );
-        
-        form.querySelector('textarea').value = '';
-        toast(done);
-      } catch (error) {
-        showError('#' + formId + '-error', ['Not Found', 'Method Not Allowed'].includes(error.message) ? new Error('이 기능은 아직 서버에서 지원되지 않습니다.') : error);
-      } finally { button.disabled = false; }
-    };
-  }
+  const form = $('#report-form');
+  if (!form) return;
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const button = form.querySelector('button');
+    if (button.disabled) return;
+    const data = new FormData(form);
+    const reason = data.get('reason').trim();
+    const errorNode = form.querySelector('[role="alert"]');
+    errorNode.textContent = '';
+    if (!reason) { errorNode.textContent = '신고 사유를 입력해주세요.'; return; }
+    button.disabled = true;
+    try {
+      await api('/resources/' + route(data.get('resource_id')) + '/report',
+        jsonRequest('POST', {reason, details: data.get('details').trim() || null}));
+      form.reset();
+      toast('신고가 접수되었습니다.');
+    } catch (error) { errorNode.textContent = error.message; }
+    finally { button.disabled = false; }
+  };
 }
 
 // Course Detail page: filters the fetched course resources by title.
 // 특정 수업에 등록된 자료들을 list 형식으로 저장한 뒤 인터페이스에 나열함
 function showResources(id) {
-  const list = resources.filter(r => String(r.course_id) === String(id) && String(r.title || '').toLowerCase().includes(resourceQuery.toLowerCase()));
+  const list = resources.filter(r => String(r.course_id) === String(id) && String(r.title || '').toLowerCase().includes(resourceQuery.toLowerCase()))
+    .sort((a, b) => Number(a.locked === true) - Number(b.locked === true));
   $('#resource-results').innerHTML = list.map(resourceRow).join('') || '<div class="empty">No resources to display.</div>';
 }
 
@@ -605,6 +597,7 @@ function resourcePage(id) {
 
       <section class="panel">
         <span class="tag">${esc(r.resource_type)}</span>
+        <span class="tag ${r.locked ? 'amber' : 'green'}">${r.locked ? '🔒 ' + esc(r.unlock_cost ?? 10) + 'P' : 'Unlocked'}</span>
 
         <h1 class="section">
           ${esc(r.title)}
@@ -618,33 +611,9 @@ function resourcePage(id) {
 
         <div class="row">
 
-          ${
-            r.has_pdf && r.locked
-              ? `
-                <button class="btn" id="preview-pdf-button" type="button" aria-controls="pdf-preview" aria-expanded="false">Preview (2 pages)</button>
-                <button class="btn dark" id="unlock-button" type="button">🔒 Unlock for ${esc(r.unlock_cost ?? 10)}P</button>
-              `
-              : r.has_pdf
-              ? `
-                <button
-                  class="btn"
-                  id="open-pdf-button"
-                  type="button"
-                  aria-controls="pdf-preview"
-                  aria-expanded="false"
-                >
-                  Open PDF
-                </button>
-              `
-              : ''
-          }
+          ${!r.locked && r.has_pdf ? '<button class="btn dark" id="open-pdf-button" type="button" aria-controls="pdf-preview" aria-expanded="false">View full PDF</button>' : ''}
 
-          <a
-            class="btn"
-            href="#help/${route(r.id)}"
-          >
-            Report / Refund
-          </a>
+          ${!r.locked && !r.is_owner ? `<a class="btn" href="#help/${route(r.id)}">Report resource</a>` : ''}
 
           <a
             class="btn"
@@ -662,11 +631,12 @@ function resourcePage(id) {
 
         </div>
 
+        ${r.locked ? `<section class="resource-card"><div class="locked-preview" data-preview-id="${esc(r.id)}"><p role="status">Loading preview…</p></div><div class="resource-card-actions"><button class="btn dark" data-unlock-id="${esc(r.id)}" type="button">Unlock for ${esc(r.unlock_cost ?? 10)}P</button><p class="error" role="alert"></p></div></section>` : ''}
         <p id="resource-error" class="error" role="alert"></p>
-        ${r.has_pdf ? `
+        ${r.has_pdf && !r.locked ? `
           <section id="pdf-preview" class="inline-pdf" aria-labelledby="pdf-preview-heading" hidden>
             <div class="row between wrap">
-              <h2 id="pdf-preview-heading">${r.locked ? 'PDF Preview (2 pages)' : 'PDF Preview'}</h2>
+              <h2 id="pdf-preview-heading">PDF Preview</h2>
               <button type="button" id="close-pdf-preview" class="btn">Close preview</button>
             </div>
             <p id="pdf-preview-status" role="status"></p>
@@ -676,7 +646,7 @@ function resourcePage(id) {
       </section>
 
 
-      <div class="chatbot-wrapper">
+      <div class="chatbot-wrapper" ${r.locked ? 'hidden' : ''}>
         <button
           type="button"
           id="chatbot-toggle"
@@ -854,9 +824,9 @@ const uploadPage = id => resourceForm(id);
 // Shared fallback page for invalid routes or missing records.
 function notFound() { return '<main class="main narrow"><div class="panel empty"><h1>Not found</h1><a href="#courses" class="btn">Back to courses</a></div></main>'; }
 // Assistant page placeholder.
-function assistant() { return '<main class="main narrow"><section class="panel"><h1>Assistant</h1><p>The AI assistant is not connected yet.</p></section></main>'; }
+
 // Account dialog and logout handler.
-const POINT_REASONS = {signup_bonus: '가입 보너스', resource_upload: '자료 업로드', request_fulfilled: '자료 요청 충족', resource_unlock: '자료 잠금 해제'};
+const POINT_REASONS = {signup_bonus: '가입 보너스', resource_upload: '자료 업로드', request_fulfilled: '자료 요청 충족', resource_unlock: '자료 잠금 해제', resource_refund: '자료 환불', resource_moderation_clawback: '자료 삭제에 따른 포인트 회수'};
 async function account() {
   $('#dialog-body').innerHTML = `<h2>${esc(user.name)}</h2><p>${esc(user.email)}</p>
     <p class="points-gold">Points: ${points === null ? '-' : esc(points)}P</p>
@@ -890,6 +860,7 @@ function jsonRequest(method, data) {
 async function render() {
   disposePdfPreview();
   disposePdfPreview = () => {};
+  cardPreviewCleanup();
   const version = ++renderVersion;
   let [page = 'home', rawId = ''] = location.hash.slice(1).split('/');
   let id; try { id = decodeURIComponent(rawId); } catch { id = ''; }
@@ -934,7 +905,7 @@ async function render() {
 
   await refreshPoints();
   if (page === 'library') {
-    libraryItems = listData((await api('/me/library')).unlocked, 'unlocked');
+    await refreshLibrary();
     courses = listData(await api('/courses'), 'courses');
   }
   if (page === 'requests') {
@@ -942,22 +913,20 @@ async function render() {
     await loadAllRequests();
   }
   if (page === 'help') {
-    courses = listData(await api('/courses'), 'courses');
-    resources = listData(await api('/resources'), 'resources');
-    libraryItems = listData((await api('/me/library')).unlocked, 'unlocked');
+    await refreshLibrary();
   }
 
   uploadRequest = null;
   if (page === 'course') {
     await refreshResources(id);
-    await loadRequests(id);
+
   }
   if (page === 'upload' && location.hash.slice(1).split('/')[2]) {
     const requestId = decodeURIComponent(location.hash.slice(1).split('/')[2]);
     const rows = listData(await api('/courses/' + route(id) + '/requests'), 'requests');
     uploadRequest = rows.find(r => String(r.id) === requestId && String(r.course_id) === String(id));
     if (!uploadRequest) throw new Error('자료 요청을 찾을 수 없습니다.');
-    if (uploadRequest.status === 'fulfilled') throw new Error('이미 해결된 요청입니다. Course 게시판에서 연결된 자료를 확인해주세요.');
+    if (uploadRequest.status === 'fulfilled') throw new Error('이미 해결된 요청입니다. 자료 요청 게시판에서 연결된 자료를 확인해주세요.');
   }
 
   if (['resource', 'edit'].includes(page)) {
@@ -1051,12 +1020,13 @@ async function render() {
   }
 
     
-    if (page === 'requests') bindRequests(null);
+    if (page === 'requests') bindRequests();
     if (page === 'help') bindHelp();
+    if (page === 'library') bindResourceCards();
     if (page === 'course' && courseBy(id)) {
       showResources(id);
-      bindRequests(id);
-      $('#resource-search').oninput = e => {resourceQuery = e.target.value; showResources(id);};
+      bindResourceCards();
+      $('#resource-search').oninput = e => {resourceQuery = e.target.value; showResources(id); bindResourceCards();};
     }
     if ($('#resource-form')) $('#resource-form').onsubmit = e => saveResource(e, page === 'edit' ? id : null);
     if ($('#delete-button')) $('#delete-button').onclick = async e => {
@@ -1071,42 +1041,109 @@ async function render() {
       finally {busy = false; button.disabled = false;}
     };
 
-    if ($('#unlock-button')) $('#unlock-button').onclick = async e => {
-      const r = resourceBy(id);
-      if (busy || !window.confirm(`${r.unlock_cost ?? 10}P를 사용해 이 자료를 잠금 해제할까요?`)) return;
-      busy = true; const button = e.currentTarget; button.disabled = true;
-      try {
-        await api('/resources/' + route(id) + '/unlock', {method: 'POST'});
-        toast('자료가 잠금 해제되었습니다.');
-        busy = false;
-        await render();
-      } catch (error) { showError('#resource-error', error); }
-      finally { busy = false; button.disabled = false; }
-    };
+    if (page === 'resource') bindResourceCards();
 
-    const previewButton = $('#preview-pdf-button') || $('#open-pdf-button');
+    const previewButton = $('#open-pdf-button');
     if (previewButton) bindPdfPreview(id, previewButton);
 
-    initChatbot(id);
+    if (page === 'resource' && !resourceBy(id)?.locked) initChatbot(id);
   } catch (error) {
     if (version !== renderVersion) return;
     $('#app').innerHTML = header(page) + `<main class="main narrow"><p class="error" role="alert">${esc(error.message)}</p><button class="btn" id="retry-button">Retry</button></main>`;
     $('#account-button').onclick = account; $('#retry-button').onclick = render;
   }
 }
+function bindResourceCards() {
+  cardPreviewCleanup();
+  let disposed = false;
+  const tasks = new Set();
+  const controllers = new Set();
+  const documents = new Set();
+  const slots = [...document.querySelectorAll('[data-preview-id]')];
+  let next = 0;
+  cardPreviewCleanup = () => {
+    disposed = true;
+    controllers.forEach(controller => controller.abort());
+    tasks.forEach(task => task.cancel());
+    documents.forEach(document => document.destroy());
+  };
+  async function loadNext() {
+    while (!disposed && next < slots.length) {
+      const slot = slots[next++];
+      const controller = new AbortController();
+      controllers.add(controller);
+      let loadingTask;
+      let renderTask;
+      try {
+        const token = sessionStorage.getItem('studyswap-access-token');
+        const response = await fetch(`${CONFIG.apiBase}/resources/${route(slot.dataset.previewId)}/preview`, {
+          headers: token ? {Authorization: `Bearer ${token}`} : {}, signal: controller.signal
+        });
+        if (!response.ok) throw new Error('Preview를 불러올 수 없습니다.');
+        const bytes = await response.arrayBuffer();
+        const pdf = await pdfLibrary();
+        if (disposed || !slot.isConnected) return;
+        loadingTask = pdf.getDocument({data: bytes, isEvalSupported: false});
+        documents.add(loadingTask);
+        const document = await loadingTask.promise;
+        const page = await document.getPage(1);
+        if (disposed || !slot.isConnected) return;
+        const width = Math.min(slot.clientWidth || 640, 800);
+        const scale = width / page.getViewport({scale: 1}).width;
+        const viewport = page.getViewport({scale});
+        const canvas = window.document.createElement('canvas');
+        const density = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.ceil(viewport.width * density);
+        canvas.height = Math.ceil(viewport.height * 0.45 * density);
+        canvas.setAttribute('role', 'img');
+        canvas.setAttribute('aria-label', 'PDF 첫 페이지 상단 미리보기');
+        renderTask = page.render({canvasContext: canvas.getContext('2d'), viewport,
+          transform: [density, 0, 0, density, 0, 0]});
+        tasks.add(renderTask);
+        await renderTask.promise;
+        if (!disposed && slot.isConnected) slot.replaceChildren(canvas);
+      } catch (error) {
+        if (!disposed && slot.isConnected) {
+          slot.innerHTML = '<p role="status">Preview를 불러올 수 없습니다.</p><button type="button" class="btn">다시 시도</button>';
+          slot.querySelector('button').onclick = () => bindResourceCards();
+        }
+      } finally {
+        controllers.delete(controller);
+        if (renderTask) tasks.delete(renderTask);
+        if (loadingTask) { documents.delete(loadingTask); await loadingTask.destroy(); }
+      }
+    }
+  }
+  for (let worker = 0; worker < Math.min(3, slots.length); worker++) loadNext();
+  window.document.querySelectorAll('[data-unlock-id]').forEach(button => {
+    button.onclick = async () => {
+      if (busy) return;
+      const resource = resourceBy(button.dataset.unlockId);
+      if (!resource || !window.confirm(`Unlock for ${resource.unlock_cost ?? 10}P?`)) return;
+      busy = true;
+      button.disabled = true;
+      const errorNode = button.parentElement.querySelector('[role="alert"]');
+      errorNode.textContent = '';
+      try {
+        await api('/resources/' + route(resource.id) + '/unlock', {method: 'POST'});
+        busy = false;
+        if (button.isConnected) go('resource/' + route(resource.id));
+        toast('자료가 잠금 해제되었습니다.');
+      } catch (error) { errorNode.textContent = error.message; }
+      finally { busy = false; button.disabled = false; }
+    };
+  });
+}
+
 function bindPdfPreview(id, button) {
   const panel = $('#pdf-preview');
   const status = $('#pdf-preview-status');
   const documentSlot = $('#pdf-preview-document');
-  const locked = button.id === 'preview-pdf-button';
-  let objectUrl;
   let attempt = 0;
 
   function close() {
     attempt++;
     documentSlot.replaceChildren();
-    if (objectUrl) URL.revokeObjectURL(objectUrl);
-    objectUrl = undefined;
     panel.hidden = true;
     button.disabled = false;
     button.setAttribute('aria-expanded', 'false');
@@ -1130,27 +1167,14 @@ function bindPdfPreview(id, button) {
     panel.scrollIntoView({block: 'nearest'});
 
     try {
-      let url;
-      if (locked) {
-        const token = sessionStorage.getItem('studyswap-access-token');
-        const response = await fetch(`${CONFIG.apiBase}/resources/${route(id)}/preview`, {
-          headers: token ? {Authorization: `Bearer ${token}`} : {}
-        });
-        if (!response.ok) throw new Error('Unable to load the preview.');
-        const blob = await response.blob();
-        if (attempt !== currentAttempt) return;
-        objectUrl = URL.createObjectURL(new Blob([blob], {type: 'application/pdf'}));
-        url = objectUrl;
-      } else {
-        const result = await api('/resources/' + route(id) + '/pdf');
-        if (attempt !== currentAttempt) return;
-        if (!result.url) throw new Error('The server did not return a PDF URL.');
-        url = new URL(result.url, CONFIG.apiBase);
-        if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Invalid PDF URL.');
-      }
+      const result = await api('/resources/' + route(id) + '/pdf');
+      if (attempt !== currentAttempt) return;
+      if (!result.url) throw new Error('The server did not return a PDF URL.');
+      const url = new URL(result.url, CONFIG.apiBase);
+      if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Invalid PDF URL.');
 
       const frame = document.createElement('iframe');
-      frame.title = locked ? 'Two-page PDF preview' : 'Full PDF preview';
+      frame.title = 'Full PDF preview';
       frame.src = url;
       const fallback = document.createElement('a');
       fallback.href = url;
@@ -1607,7 +1631,7 @@ async function saveResource(event, id) {
 
     toast(
       id == null
-        ? (respondingTo ? '자료를 업로드하고 요청을 해결했습니다. (+30P)' : 'Resource and PDF uploaded successfully. (+20P)')
+        ? (respondingTo ? '자료를 업로드하고 요청을 해결했습니다.' : 'Resource and PDF uploaded successfully.')
         : 'Changes saved.'
     );
 
