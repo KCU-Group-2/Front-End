@@ -451,21 +451,39 @@ async function showCourses() {
 // Reusable resource row used on a Course Detail page.
 function resourceRow(r) {
   const locked = r.locked === true;
-  return `<article class="resource resource-card">
+  return `<article class="resource resource-card"
+      onclick="if (!event.target.closest('button, a')) location.hash='resource/${route(r.id)}'"
+      style="cursor:pointer;">
     <div class="resource-card-heading">
-      <div class="grow"><h3 class="resource-title"><span class="tag ${locked ? 'amber' : 'green'}">${locked ? '🔒 ' + esc(r.unlock_cost ?? 10) + 'P' : 'Unlocked'}</span><span>${esc(r.title)}</span></h3>
+      <div class="grow">
+        <h3 class="resource-title">
+          <span class="tag ${locked ? 'amber' : 'green'}">
+            ${locked ? esc(r.unlock_cost ?? 10) + 'P' : 'Unlocked'}
+         </span>
+          <a href="#resource/${route(r.id)}">${esc(r.title)}</a>
+        </h3>
       <small>${esc(r.resource_type)} · ${esc(uploadedOn(r))}</small></div>
-      ${locked ? '' : `<a class="resource-view" href="#resource/${route(r.id)}">View →</a>`}
+      ${locked
+        ? `<button class="btn dark" data-unlock-id="${esc(r.id)}" type="button">Unlock 
+      for ${esc(r.unlock_cost ?? 10)}P</button>`
+        : `<a class="resource-view" href="#resource/${route(r.id)}">View →</a>`
+      }
     </div>
-    ${locked && r.has_pdf ? `<div class="locked-preview" data-preview-id="${esc(r.id)}"><p role="status">Loading preview…</p></div>` : ''}
-    ${locked ? `<div class="resource-card-actions"><button class="btn dark" data-unlock-id="${esc(r.id)}" type="button">Unlock for ${esc(r.unlock_cost ?? 10)}P</button><p class="error" role="alert"></p></div>` : ''}
+
   </article>`;
 }
 function libraryPage() {
   const section = (title, rows, empty) => `<section class="section"><div class="section-title"><h2>${title}</h2><small>${rows.length} resources</small></div><div class="panel list">${rows.map(r => resourceRow({...r, locked: false})).join('') || `<div class="empty">${empty}</div>`}</div></section>`;
-  return `<main class="main narrow"><div class="page-heading"><h1>My Library</h1></div>
-    ${section('My Uploads', myUploads, '아직 업로드한 자료가 없습니다.')}
-    ${section('Unlocked Resources', libraryItems, '아직 잠금 해제한 자료가 없습니다.')}</main>`;
+  return `<main class="main narrow">
+    <div class="page-heading">
+      <h1>My Library</h1>
+    </div>
+
+  <div class="library-sections">
+    ${section('내가 업로드한 자료', myUploads, '아직 업로드한 자료가 없습니다.')}
+    ${section('잠금 해제한 자료', libraryItems, '아직 잠금 해제한 자료가 없습니다.')}
+  </div>
+</main>`;
 }
 
 // Global request board: requests from every course, with a course picker for new requests.
@@ -507,7 +525,8 @@ function showRequests() {
     const done = r.status === 'fulfilled';
     const date = new Date(r.created_at);
     return `<article class="panel request-card">
-      <div class="row between wrap"><span class="tag ${done ? 'green' : 'amber'}">${done ? '해결됨' : '요청 중'}</span><small>${esc(code(courseBy(r.course_id)))} · ${esc(r.requester || 'Anonymous')}${Number.isNaN(date.getTime()) ? '' : ' · ' + esc(date.toLocaleDateString())}</small></div>
+      <div class="row between wrap">
+        <span class="tag ${done ? 'green' : 'amber'}">${done ? '해결됨' : '요청 중'}</span><small>${esc(code(courseBy(r.course_id)))} · ${esc(r.requester || 'Anonymous')}${Number.isNaN(date.getTime()) ? '' : ' · ' + esc(date.toLocaleDateString())}</small></div>
       <p class="request-content">${esc(r.content)}</p>
       ${done ? (r.fulfilled_resource_id != null ? `<a class="btn" href="#resource/${route(r.fulfilled_resource_id)}">업로드된 자료 보기</a>` : '<small>연결된 자료가 없습니다.</small>') : `<a class="btn dark" href="#upload/${route(r.course_id)}/${route(r.id)}">자료 올리기</a>`}
     </article>`;
@@ -611,8 +630,6 @@ function resourcePage(id) {
 
         <div class="row">
 
-          ${!r.locked && r.has_pdf ? '<button class="btn dark" id="open-pdf-button" type="button" aria-controls="pdf-preview" aria-expanded="false">View full PDF</button>' : ''}
-
           ${!r.locked && !r.is_owner ? `<a class="btn" href="#help/${route(r.id)}">Report resource</a>` : ''}
 
           <a
@@ -634,10 +651,9 @@ function resourcePage(id) {
         ${r.locked ? `<section class="resource-card"><div class="locked-preview" data-preview-id="${esc(r.id)}"><p role="status">Loading preview…</p></div><div class="resource-card-actions"><button class="btn dark" data-unlock-id="${esc(r.id)}" type="button">Unlock for ${esc(r.unlock_cost ?? 10)}P</button><p class="error" role="alert"></p></div></section>` : ''}
         <p id="resource-error" class="error" role="alert"></p>
         ${r.has_pdf && !r.locked ? `
-          <section id="pdf-preview" class="inline-pdf" aria-labelledby="pdf-preview-heading" hidden>
+          <section id="pdf-preview" class="inline-pdf" aria-labelledby="pdf-preview-heading">
             <div class="row between wrap">
-              <h2 id="pdf-preview-heading">PDF Preview</h2>
-              <button type="button" id="close-pdf-preview" class="btn">Close preview</button>
+              <h2 id="pdf-preview-heading">PDF</h2>
             </div>
             <p id="pdf-preview-status" role="status"></p>
             <div id="pdf-preview-document"></div>
@@ -1043,8 +1059,9 @@ async function render() {
 
     if (page === 'resource') bindResourceCards();
 
-    const previewButton = $('#open-pdf-button');
-    if (previewButton) bindPdfPreview(id, previewButton);
+    if (page === 'resource' && resourceBy(id)?.has_pdf && !resourceBy(id)?.locked) {
+      bindPdfPreview(id);
+    }
 
     if (page === 'resource' && !resourceBy(id)?.locked) initChatbot(id);
   } catch (error) {
@@ -1135,60 +1152,62 @@ function bindResourceCards() {
   });
 }
 
-function bindPdfPreview(id, button) {
+function bindPdfPreview(id) {
   const panel = $('#pdf-preview');
   const status = $('#pdf-preview-status');
   const documentSlot = $('#pdf-preview-document');
+
+  if (!panel || !status || !documentSlot) return;
+
   let attempt = 0;
 
-  function close() {
-    attempt++;
-    documentSlot.replaceChildren();
-    panel.hidden = true;
-    button.disabled = false;
-    button.setAttribute('aria-expanded', 'false');
-  }
-
-  disposePdfPreview = close;
-  $('#close-pdf-preview').onclick = () => {
-    close();
-    button.focus();
-  };
-  button.onclick = async () => {
-    if (!panel.hidden && documentSlot.childElementCount) {
-      panel.scrollIntoView({block: 'nearest'});
-      return;
-    }
+  async function loadPdf() {
     const currentAttempt = ++attempt;
+
     panel.hidden = false;
-    button.disabled = true;
-    button.setAttribute('aria-expanded', 'true');
     status.textContent = 'Loading PDF…';
-    panel.scrollIntoView({block: 'nearest'});
 
     try {
       const result = await api('/resources/' + route(id) + '/pdf');
+
       if (attempt !== currentAttempt) return;
-      if (!result.url) throw new Error('The server did not return a PDF URL.');
+
+      if (!result.url) {
+        throw new Error('The server did not return a PDF URL.');
+      }
+
       const url = new URL(result.url, CONFIG.apiBase);
-      if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Invalid PDF URL.');
+
+      if (!['https:', 'http:'].includes(url.protocol)) {
+        throw new Error('Invalid PDF URL.');
+      }
 
       const frame = document.createElement('iframe');
-      frame.title = 'Full PDF preview';
+      frame.title = 'Full PDF';
       frame.src = url;
+
       const fallback = document.createElement('a');
       fallback.href = url;
       fallback.target = '_blank';
       fallback.rel = 'noopener noreferrer';
       fallback.textContent = 'Open PDF in a new tab';
+
       documentSlot.replaceChildren(frame, fallback);
       status.textContent = '';
+
     } catch (error) {
-      if (attempt === currentAttempt) status.textContent = error.message;
-    } finally {
-      if (attempt === currentAttempt) button.disabled = false;
+      if (attempt === currentAttempt) {
+        status.textContent = error.message;
+      }
     }
+  }
+
+  disposePdfPreview = () => {
+    attempt++;
+    documentSlot.replaceChildren();
   };
+
+  loadPdf();
 }
 
 // ===== PDF Chatbot =====
