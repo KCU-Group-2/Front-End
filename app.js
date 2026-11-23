@@ -64,8 +64,7 @@ async function api(path, options = {}) {
  * Data Loading Section **From API
  * 
  */
-// API origin is configured in the HTML file.
-const CONFIG = { apiBase: (window.STUDYSWAP_API_BASE || 'http://127.0.0.1:8000').replace(/\/$/, '') };
+const CONFIG = { apiBase: (window.STUDYSWAP_API_BASE || 'https://studyswap-backend-dp32.onrender.com').replace(/\/$/, '') };
 const shortDescription = c => String(c?.title || '');
 function listData(data, key) {
   const list = Array.isArray(data) ? data : data?.[key];
