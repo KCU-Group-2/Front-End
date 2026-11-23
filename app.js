@@ -220,9 +220,32 @@ function home() {
             StudySwap은 UW–Madison 학생들이 수업 노트, 스터디 가이드,
             기출자료 등 학습 자료를 찾고 공유할 수 있는 플랫폼입니다.
           </p>
+
+          <div class="home-actions">
+            <a class="btn dark home-primary" href="#courses">
+              강의 찾기 →
+            </a>
+
+            <a class="btn home-secondary" href="#upload">
+              자료 업로드
+            </a>
+          </div>
         </div>
 
-        <div class="home-feature-grid">
+        <div class="home-hero-art">
+          <div class="book-stack">
+            <div class="book">NOTES</div>
+            <div class="book">STUDY GUIDES</div>
+            <div class="book">OLD EXAMS</div>
+          </div>
+
+          <div class="study-icon">
+            <img src="pngegg.png" alt="Bucky Badger">
+          </div>
+        </div>
+      </section>
+
+      <section class="home-feature-grid">
 
         <a href="#courses" class="home-feature-card">
           <div class="feature-icon">⌕</div>
@@ -234,6 +257,7 @@ function home() {
             </p>
           </div>
 
+          <span>→</span>
         </a>
 
         <a href="#upload" class="home-feature-card">
@@ -246,6 +270,7 @@ function home() {
             </p>
           </div>
 
+          <span>→</span>
         </a>
 
         <a href="#requests" class="home-feature-card">
@@ -257,9 +282,10 @@ function home() {
               유용한 자료를 공유하고 필요한 자료를 찾아 더 효율적으로 공부해보세요.
             </p>
           </div>
+
+          <span>→</span>
         </a>
 
-        </div>
       </section>
 
       <section class="home-bottom-grid">
